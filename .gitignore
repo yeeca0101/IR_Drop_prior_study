@@ -1,0 +1,13 @@
+__pycache__
+*/checkpoint
+*/checkpoints
+data
+logs
+results
+csv
+
+*.pna
+*.sp
+*.png
+*.npy
+*.csv
