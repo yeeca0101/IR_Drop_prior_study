@@ -6,50 +6,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score
+from tqdm import tqdm
 
 
-def min_max_norm(x):
-    return (x-x.min())/(x.max()-x.min())
+from .utils import min_max_norm, DiceLoss
 
-class DiceLoss(nn.Module):
-    def __init__(self, ignore_index=None, smooth=1e-5):
-        super(DiceLoss, self).__init__()
-        self.ignore_index = ignore_index
-        self.smooth = smooth
 
-    def forward(self, pred, target):
-        B, C, H, W = pred.shape
-        assert C == 1, "This implementation is for binary segmentation"
-        
-        # Squeeze the channel dimension
-        pred = pred.squeeze(1)
-        target = target.squeeze(1)
-        
-        # Create mask for ignored index
-        if self.ignore_index is not None:
-            mask = (target != self.ignore_index).float()
-        else:
-            mask = torch.ones_like(pred)
-        
-        # Multiply pred and target by mask
-        pred = pred * mask
-        target = target * mask
-        
-        # Flatten pred and target
-        pred = pred.view(B, -1)
-        target = target.view(B, -1)
-        
-        # Compute Dice coefficient
-        intersection = (pred * target).sum(dim=1)
-        union = pred.sum(dim=1) + target.sum(dim=1)
-        
-        dice = (2. * intersection + self.smooth) / (union + self.smooth)
-        
-        return 1. - dice.mean()
-    
 class TestCaseModule:
     def __init__(self, model, checkpoint_path, dataset, batch_size=1, 
-                 device='cuda:7',norm_out=True,loss_with_logit=True,testcase_name=True):
+                 device='cuda:0',norm_out=True,loss_with_logit=True,testcase_name=True):
         self.model = model
         self.checkpoint_path = checkpoint_path
         self.dataset = dataset
@@ -193,13 +158,99 @@ class TestCaseModule:
         return dice_coeff.item(), f1
     
 
-def get_results(model,dataset,checkpoint_path,norm_out=False,show_input=False,loss_with_logit=True, device='cuda:7',testcase_name=True):
-    load_score(chkpt_path=checkpoint_path)
-    tester = TestCaseModule(model,checkpoint_path, dataset,norm_out=norm_out,loss_with_logit=loss_with_logit, device=device,testcase_name=testcase_name)
-    tester.run(visualize_input=show_input)
-    tester.show()
-    result_df = tester.results_df
-    result_df.iloc[:,1:] = result_df.iloc[:,1:].apply(lambda x : x.round(3))
-    display(result_df)
-    f1,mae,n_mae = tester.results_df['F1 Score'].mean(),tester.results_df['MAE'].mean(),tester.results_df['Normalized MAE'].mean()
-    print(f'f1 : {f1:.3f}, mae : {mae:.3f}, normalized mae : {n_mae:.3f}')
+class F1ScoreEvaluator(nn.Module):
+    def __init__(self, threshold=90):
+        """
+        F1 score를 계산하기 위한 클래스.
+        Args:
+        - threshold (int): 상위 퍼센티지를 결정하는 기준. 기본값은 상위 10% 기준 (90 퍼센타일).
+        """
+        super(F1ScoreEvaluator, self).__init__()
+        self.threshold = threshold
+        self.reset()
+
+    def reset(self):
+        """내부적으로 값을 초기화하는 함수."""
+        self.true_labels = []
+        self.pred_labels = []
+
+    def update(self, preds, targets):
+        """
+        F1 스코어 업데이트를 위해 예측 값과 실제 값 추가.
+        
+        Args:
+        - preds (torch.Tensor): 모델의 예측 값 (IR drops).
+        - targets (torch.Tensor): 실제 라벨 (0 또는 1).
+        """
+        # numpy로 변환
+        preds_np = preds.cpu().detach().numpy()
+        targets_np = targets.cpu().detach().numpy()
+
+        # 상위 10% 기준 계산
+        threshold_value = np.percentile(preds_np, self.threshold)
+
+        # 예측값을 상위 10% 기준으로 레이블링 (1: positive, 0: negative)
+        pred_labels = (preds_np >= threshold_value).astype(int)
+
+        # 실제 타겟 레이블도 비슷하게 레이블링 (상위 10% 양성)
+        target_labels = (targets_np >= np.percentile(targets_np, self.threshold)).astype(int)
+
+        # 리스트에 예측 값과 실제 값 추가
+        self.true_labels.extend(target_labels.flatten())
+        self.pred_labels.extend(pred_labels.flatten())
+
+    def compute(self):
+        """현재까지의 F1 score를 계산."""
+        return f1_score(self.true_labels, self.pred_labels)
+
+def predict_and_evaluate_f1(dataset, model, checkpoint_path, index=None, threshold=90, test_mode=False, batch_size=32, device='cpu'):
+    # 모델을 지정된 device로 이동
+    model.to(device)
+    model.eval()
+
+    # 모델의 파라미터 로드
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device)['net'])
+
+    # F1ScoreEvaluator 객체 생성
+    f1_evaluator = F1ScoreEvaluator(threshold=threshold)
+
+    # test_mode가 True일 경우 DataLoader를 사용
+    if test_mode:
+        # DataLoader 생성
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        
+        # 배치마다 평가 수행
+        with torch.no_grad():
+            for batch in tqdm(loader):
+                inputs, targets = batch[0].to(device), batch[1].to(device)  # 데이터를 지정된 device로 이동
+                preds = model(inputs)  # 모델 예측
+                preds = preds.squeeze(0)  # 배치 차원 제거
+                f1_evaluator.update(preds, targets)  # F1 score 업데이트
+    else:
+        # 단일 샘플 평가
+        if index is None:
+            raise ValueError("If test_mode is False, an index must be provided.")
+        
+        # 데이터셋에서 샘플 가져오기
+        sample = dataset.__getitem__(index)
+        inp, target = sample[0].to(device), sample[1].to(device)
+
+        # 입력 텐서 준비 (배치 차원 추가)
+        inp_batch = inp.unsqueeze(0)
+
+        # 예측 수행
+        with torch.no_grad():
+            pred = model(inp_batch)
+
+        # 예측 결과 압축 (배치 차원 제거)
+        pred = pred.squeeze(0)
+        
+        # F1 score 업데이트
+        f1_evaluator.update(pred, target)
+
+    # F1 score 계산
+    f1 = f1_evaluator.compute()
+    
+    print(f"F1 Score: {f1}")
+    
+    return f1

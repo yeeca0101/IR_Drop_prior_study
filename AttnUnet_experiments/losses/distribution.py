@@ -65,18 +65,18 @@ class PixelDistributionLoss(nn.Module):
             raise ValueError(f"Unsupported loss type: {self.loss_type}")
 
 def test(target, prediction):
-    # test_loss_list = ['kl', 'js', 'wasserstein', 'correlation', 'histogram_matching']
-    test_loss_list = ['kl', 'kl_restoration']
+    test_loss_list = ['kl', 'js', 'wasserstein', 'correlation', 'histogram_matching']
     for fn in test_loss_list:    
         loss_fn = PixelDistributionLoss(loss_type=fn)
-
-        loss = loss_fn(target, prediction)
+        if fn =='kl':
+            loss = F.kl_div(prediction.log(), target, reduction='mean')
+        else:
+            loss = loss_fn(target, prediction)
         try:
             loss.backward()
-            print(f"{fn} Loss: {loss.item()} (Backward pass successful)")
+            print(f"{fn}  Loss: {loss.item()} (Backward pass successful)")
         except RuntimeError as e:
-            print(f"{fn} Loss: {loss.item()} (Backward pass failed: {str(e)})")
-
+            print(f"{fn}  Loss: {loss.item()} (Backward pass failed: {str(e)})")
 
 
 def generate_same_distribution(hw, batch_size=2, channels=1):
