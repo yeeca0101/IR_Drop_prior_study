@@ -27,11 +27,15 @@ def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img
     elif dt == 'asap7_train_val':                        
         dataset=build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[0] if  split == 'train' else build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[1]
         print(f'asap7_train_val : {split}')
-    elif dt == 'cus_210nm':                        
-        dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[1]
+    elif dt == 'cus_210nm':  
+        if split == 'test':
+            dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])                        
+        else: dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[1]
         print(f'cus_210nm : {split}')
-    elif dt == 'cus_1um':                        
-        dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[1]
+    elif dt == 'cus_1um':       
+        if split == 'test':
+            dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])                 
+        else : dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[1]
         print(f'cus_1um : {split}')
     elif dt == 'asap7_fine':
         dataset = TestASAP7Dataset(root_path='/data/real-circuit-benchmarks/asap7/numpy_data',

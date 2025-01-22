@@ -8,7 +8,7 @@ from .parts.exp_parts import VectorQuantiser # 6_1 parts
 
 class AttnUnetV6(nn.Module):
     def __init__(self, in_ch=12, out_ch=1, dropout_name='', dropout_p=0.5,
-                  num_embeddings=64, decay=0.99, epsilon=1e-5,use_ema=False,act=nn.ReLU()):
+                  num_embeddings=64, decay=0.99, epsilon=1e-5,use_ema=False,act=SwishT()):
         super().__init__()
 
         in_channels = [12, 32, 64, 128, 256, 512]

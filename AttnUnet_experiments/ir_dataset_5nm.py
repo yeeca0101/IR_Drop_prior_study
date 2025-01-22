@@ -86,6 +86,8 @@ class IRDropDataset5nm(Dataset):
             if len(file_groups['current']) != len(pad_distance_files):
                 raise ValueError("Mismatch in the number of current and pad_distance files!")
             zipped_files = zip(file_groups['current'], file_groups['ir_drop'], pad_distance_files)
+        else:
+            raise ValueError(f"Not support {self.in_ch} channels.")
 
         for files in zipped_files:
             current, ir_drop = files[:2]
@@ -133,6 +135,7 @@ class IRDropDataset5nm(Dataset):
         current = input_data_2ch[..., 0]  # 2채널에서 current 추출
         resistance_total = input_data_2ch[..., 1]  # 2채널에서 resistance_total 추출
 
+        print(file_group['current'])
         input_data_3ch = self._combine_3ch_data(current, pad_distance, resistance_total)
 
         return input_data_3ch, ir_drop
@@ -162,17 +165,45 @@ class IRDropDataset5nm(Dataset):
 
     
 if __name__ =='__main__':
-    root_path = "/data/gen_pdn"
-    selected_folders = ['210nm_numpy','1um_numpy']
-    post_fix = ""
+    def test_dataset(i):
+        root_path = "/data/gen_pdn/pdn_data_3rd"
+        selected_folders = ['1um_numpy']
+        post_fix = ""
 
-    dataset = IRDropDataset5nm(root_path=root_path,
-                                selected_folders=selected_folders,
-                                post_fix_path=post_fix,
-                                in_ch=2)
+        dataset = IRDropDataset5nm(root_path=root_path,
+                                    selected_folders=selected_folders,
+                                    post_fix_path=post_fix,
+                                    train=False,
+                                    in_ch=3)
+        a = dataset.__getitem__(i)
+        print(a[0].shape)
+        print(dataset.__len__())
+
+    def test_new_data_error():
+        root_path = "/data/gen_pdn/pdn_data_3rd"
+        selected_folders = ['1um_numpy']
+        post_fix = ""
+
+        dataset = IRDropDataset5nm(root_path=root_path,
+                                    selected_folders=selected_folders,
+                                    post_fix_path=post_fix,
+                                    train=False,
+                                    in_ch=3)
+        # 3rd error : 18, 26 (118,126)
+        error_count = 0
+        error_indices = []
+        for i in range(dataset.__len__()):
+            print(f'{i} processing')
+            try:
+                a = dataset.__getitem__(i)
+                print(a[0].shape)
+                print(dataset.__len__())
+            except:
+                error_count +=1
+                error_indices.append(i)
+                continue
+        print('error_count : ',error_count)
+        print('error_indices : ',error_indices)
 
 
-
-    a = dataset.__getitem__(0)
-    print(a[0].shape)
-    print(dataset.__len__())
+    test_dataset(26)

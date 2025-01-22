@@ -94,7 +94,7 @@ class DatasetConverter:
 
 if __name__ == '__main__':
     # Main Execution
-    base_path = "/data/gen_pdn/test"
+    base_path = "/data/gen_pdn/pdn_data_3rd"
     resolution_folders = ["1um",'210nm']  # or "210nm"
 
     for resolution_folder in resolution_folders:

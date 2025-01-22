@@ -819,7 +819,7 @@ def build_dataset_5m(img_size=256,train=True,
 def build_dataset_5m_test(img_size=256,
                  in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',]):
 
-    root_path = "/data/gen_pdn/test"
+    root_path = "/data/gen_pdn/pdn_data_3rd"
     post_fix = ""
     dataset = IRDropDataset5nm(root_path=root_path,
                                img_size=img_size,
