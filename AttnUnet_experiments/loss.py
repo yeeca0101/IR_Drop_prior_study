@@ -158,6 +158,22 @@ class LossSelect(nn.Module):
             loss_fn = PixelDistributionLoss(loss_type=self.loss_type)
         elif self.loss_type == 'ec_ssim': # Error-Centric SSIM Loss (EC-SSIM Loss)
             loss_fn = ECSSIMLoss()
+        elif self.loss_type == 'ssim_mae_ec_ssim_dice':
+            self.lambda_fn_dict={
+                'loss_1':[0.4,'ssim'],
+                'loss_2':[0.1,'ec_ssim'],
+                'loss_3':[0.4,'mae'],
+                'loss_3':[0.1,'dice'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_mae_ec_ssim_dice':
+            self.lambda_fn_dict={
+                'loss_1':[0.4,'ms_ssim'],
+                'loss_2':[0.1,'ec_ssim'],
+                'loss_3':[0.4,'mae'],
+                'loss_3':[0.1,'dice'],
+            }
+            loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_ec_ssim':
             self.lambda_fn_dict={
                 'loss_2':[0.5,'ssim'],
@@ -254,6 +270,13 @@ class LossSelect(nn.Module):
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_mae_ec_ssim':
+            self.lambda_fn_dict={
+                'loss_1':[1,'ssim'],
+                'loss_2':[0.1,'ec_ssim'],
+                'loss_3':[1,'mae'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_mae_ec_ssim':
             self.lambda_fn_dict={
                 'loss_1':[1,'ms_ssim'],
                 'loss_2':[0.1,'ec_ssim'],
