@@ -2,12 +2,13 @@ import torch
 import numpy as np
 from torch import nn
 from torch.nn import functional as F
-from .parts.vqvae import VectorQuantizer  # vqvae.py의 VectorQuantizer만 가져오기
+from .parts.vqvae import VectorQuantizer  # V6 parts
 from .parts.v6_parts import *
+from .parts.exp_parts import VectorQuantiser # 6_1 parts
 
 class AttnUnetV6(nn.Module):
     def __init__(self, in_ch=12, out_ch=1, dropout_name='', dropout_p=0.5,
-                  num_embeddings=64, decay=0.99, epsilon=1e-5,use_ema=False,act=SwishT()):
+                  num_embeddings=64, decay=0.99, epsilon=1e-5,use_ema=False,act=nn.ReLU()):
         super().__init__()
 
         in_channels = [12, 32, 64, 128, 256, 512]
