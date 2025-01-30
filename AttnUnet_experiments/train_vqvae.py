@@ -52,40 +52,17 @@ parser.add_argument('--in_ch', type=int, default=12, help='1 : only use current 
 parser.add_argument('--img_size', type=int, default=512, help='input img_size')
 parser.add_argument('--mixed_precision', type=bool, default=False, help='mixed_precision')
 parser.add_argument('--monitor', type=str, default='f1', help='monitor metric')
-parser.add_argument('--use_ema', type=bool, default=True, help='vq ema')
+parser.add_argument('--use_raw', type=bool, default=False, help='not normalized ir drop map.')
 parser.add_argument('--vqvae_size', type=str, default='default', help='vqvae model size : [default, small, large]') # vqvae_size 추가
 parser.add_argument('--post_min_max', type=bool, default=False, help='if True, min_max_norm(model(x)) ') 
-parser.add_argument('--use_raw', type=bool, default=False, help='not normalized ir drop map.')
+parser.add_argument('--use_ema', action='store_true', help='vq ema')
 parser.add_argument('--dbu_per_px', type=str, default='1um', help='210nm or 1um')
 parser.add_argument('--checkpoint_path', type=str, default='', help='')
+parser.add_argument('--num_embeddings', type=int, default=512, help='number of codebooks vector')
 
 args = parser.parse_args()
 
 
-def build_model(arch):
-    if arch == 'attn_12ch':
-        pass
-    elif arch == 'attn_base':
-        model = AttnUnetBase()
-    elif arch == 'attnv2':
-        model = AttnUnetV2(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
-    elif arch == 'attnv3':
-        model = AttnUnetV3(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
-    elif arch == 'attnv4':
-        model = AttnUnetV4(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch, num_head=2 if args.in_ch==2 else 4)    
-    elif arch == 'attnv5':
-        model = AttnUnetV5(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch,use_ema=args.use_ema)        
-    elif arch == 'attnv5_1':
-        model = AttnUnetV5_1(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch,use_ema=args.use_ema)        
-    elif arch == 'attnv5_2':
-        model = AttnUnetV5_2(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch,use_ema=args.use_ema)        
-    elif arch == 'attnv6':
-        model = AttnUnetV6(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch,use_ema=args.use_ema)        
-    elif arch == 'vqvae':
-        model = create_model(args.vqvae_size,in_ch=args.in_ch,use_ema = args.use_ema) # vqvae 모델 생성 추가
-    else:
-        raise NameError(f'arch type error : {arch}')
-    return model
 
 
 class IRDropPrediction(LightningModule):
@@ -96,7 +73,7 @@ class IRDropPrediction(LightningModule):
         self.num_workers=4
         self.use_ema = args.use_ema
 
-        self.model = build_model(args.arch)
+        self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)
         if args.finetune:
             self.model = init_weights_chkpt(self.model,args.save_folder)
         elif args.checkpoint_path:
@@ -111,8 +88,9 @@ class IRDropPrediction(LightningModule):
                                     post_min_max=args.post_min_max
                                     ) #nn.MSELoss() #combined_loss #CustomLoss() #nn.MSELoss()
         print(self.criterion.loss_type)
+        print('use ema : ', self.use_ema)
         self.metrics = IRDropMetrics(loss_with_logit=args.loss_with_logit,post_min_max=args.post_min_max)
-        self.save_hyperparameters()
+        # self.save_hyperparameters()
 
     def forward(self, x):
         return self.model(x)
@@ -129,6 +107,7 @@ class IRDropPrediction(LightningModule):
         else:
             loss = recon_loss + dictionary_loss + commitment_loss
         
+
         metrics = self.metrics.compute_metrics(outputs['x_recon'] , targets)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('train_mae', metrics['mae'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -154,8 +133,11 @@ class IRDropPrediction(LightningModule):
         return loss
 
     def configure_optimizers(self):
-        quantizer_params = list(self.model.vq.parameters()) if not self.use_ema else []
-        network_params = [p for n, p in self.model.named_parameters() if 'vq' not in n]
+        # 2025.1.23 mod
+        # quantizer_params = list(self.model.vq.parameters()) if not self.use_ema else []
+        # network_params = [p for n, p in self.model.named_parameters() if 'vq' not in n]
+
+        network_params = self.model.parameters()
 
         # Configure network optimizer
         if args.optim == 'adam':
@@ -175,35 +157,35 @@ class IRDropPrediction(LightningModule):
         else:
             raise ValueError(f'Scheduler {args.scheduler} is not supported')
 
-        if not self.use_ema:
-            # Configure VQ optimizer and scheduler
-            optimizer_vq = optim.Adam(quantizer_params, lr=args.vq_lr, weight_decay=0)
-            scheduler_vq = optim.lr_scheduler.StepLR(optimizer_vq, step_size=10, gamma=0.5)
+        # if not self.use_ema:
+        #     # Configure VQ optimizer and scheduler
+        #     optimizer_vq = optim.Adam(quantizer_params, lr=args.vq_lr, weight_decay=0)
+        #     scheduler_vq = optim.lr_scheduler.StepLR(optimizer_vq, step_size=10, gamma=0.5)
             
-            return [
-                {
-                    "optimizer": optimizer_network,
-                    "lr_scheduler": {
-                        "scheduler": scheduler_network,
-                        "monitor": "val_mae"
-                    }
-                },
-                {
-                    "optimizer": optimizer_vq,
-                    "lr_scheduler": {
-                        "scheduler": scheduler_vq,
-                        "monitor": "val_mae"
-                    }
-                }
-            ]
-        else:
-            return {
-                "optimizer": optimizer_network,
-                "lr_scheduler": {
-                    "scheduler": scheduler_network,
-                    "monitor": "val_mae"
-                }
+        #     return [
+        #         {
+        #             "optimizer": optimizer_network,
+        #             "lr_scheduler": {
+        #                 "scheduler": scheduler_network,
+        #                 "monitor": "val_mae"
+        #             }
+        #         },
+        #         {
+        #             "optimizer": optimizer_vq,
+        #             "lr_scheduler": {
+        #                 "scheduler": scheduler_vq,
+        #                 "monitor": "val_mae"
+        #             }
+        #         }
+        #     ]
+        # else:
+        return {
+            "optimizer": optimizer_network,
+            "lr_scheduler": {
+                "scheduler": scheduler_network,
+                "monitor": "val_mae"
             }
+        }
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
@@ -303,7 +285,7 @@ class CustomCheckpoint(Callback):
                         old_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
                         os.remove(old_path)
                     use_ema_str = 'use_ema' if args.use_ema else 'non_ema'
-                    self.best_model_file_name = f'VQVAE_{args.vqvae_size}_{use_ema_str}_{trainer.current_epoch}_{val_metric:.4f}.pth'
+                    self.best_model_file_name = f'{args.arch}_embd{args.num_embeddings}_{use_ema_str}_{trainer.current_epoch}_{val_metric:.4f}.pth'
                     new_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
                     os.makedirs(self.checkpoint_dir, exist_ok=True)
                     torch.save(state, new_path)

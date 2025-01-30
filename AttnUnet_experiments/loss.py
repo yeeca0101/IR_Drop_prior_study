@@ -357,6 +357,25 @@ class LossSelect(nn.Module):
         else:
             return pred, target
 
+class MultiTaskLoss(nn.Module):
+    def __init__(self,loss_type,dice_q, alpha=0.8, beta=0.1, gamma=0.1,**kwargs):
+        super().__init__()
+        self.loss_type = loss_type
+        self.criterion_recon = LossSelect(loss_type,dice_q=dice_q)
+        self.criterion_loc = IRDiceLoss(q=dice_q)
+        self.criterion_error = nn.MSELoss()
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
+    def forward(self,outputs,targets):
+        x_recon, loc_hat, error_hat = outputs['x_recon'],outputs['loc'],outputs['error']
+        error_true = targets - x_recon
+        loss_recon = self.criterion_recon(x_recon,targets)
+        loss_loc = self.criterion_loc(loc_hat,targets)
+        loss_error = self.criterion_error(error_hat,error_true)
+
+        return loss_recon * self.alpha + loss_loc * self.beta + loss_error * self.gamma
 
 ############ Scaling ############################
 # def min_max_norm(x):

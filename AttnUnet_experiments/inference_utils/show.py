@@ -31,7 +31,7 @@ def predict_and_visualize(dataset, model, checkpoint_path,
 
     with torch.no_grad():
         pred = model(inp_batch)
-    if len(pred) == 3: 
+    if len(pred) >= 3: 
         pred = pred['x_recon']
     pred = pred.detach().cpu() 
 
@@ -202,8 +202,10 @@ def parse_checkpoint_path(path):
 
 def get_num_embeddings(state_dict):
     for key, value in state_dict.items():
-        if 'e_i_ts' in key.lower() or 'embedding' in key.lower():
+        if 'e_i_ts' in key.lower():
             return value.shape[1]
+        elif 'embedding' in key.lower():
+            return value.shape[0]
     return None
 
 def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14):
@@ -251,7 +253,13 @@ def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices,
                     model = AttnUnetV5_2(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
                 elif 'attnv5' in version:
                     model = AttnUnetV5(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
-                else:
+                elif 'attnv6_1' in version:
+                    if 'swisht' not in checkpoint_path:
+                        import torch.nn as nn
+                        kwargs = {'act':nn.ReLU()}
+                    else : kwargs = {}
+                    model = AttnUnetV6_1(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings,**kwargs)
+                elif 'attnv6' in version:
                     model = AttnUnetV6(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
             except:
                 raise ValueError(f'{checkpoint_path} not match {version} or embeddings : {num_embeddings}')

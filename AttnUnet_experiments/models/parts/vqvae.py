@@ -325,8 +325,8 @@ def init_weights(model):
             torch.nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 torch.nn.init.constant_(m.bias, 0)
-        elif isinstance(m, torch.nn.Embedding):
-            torch.nn.init.uniform_(m.weight, -1.0, 1.0)  # Initialize embeddings uniformly for VQ layers
+        # elif isinstance(m, torch.nn.Embedding):
+        #     torch.nn.init.uniform_(m.weight, -1.0, 1.0)  # Initialize embeddings uniformly for VQ layers
 
 
 

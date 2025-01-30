@@ -135,7 +135,6 @@ class IRDropDataset5nm(Dataset):
         current = input_data_2ch[..., 0]  # 2채널에서 current 추출
         resistance_total = input_data_2ch[..., 1]  # 2채널에서 resistance_total 추출
 
-        print(file_group['current'])
         input_data_3ch = self._combine_3ch_data(current, pad_distance, resistance_total)
 
         return input_data_3ch, ir_drop
@@ -181,7 +180,7 @@ if __name__ =='__main__':
 
     def test_new_data_error():
         root_path = "/data/gen_pdn/pdn_data_3rd"
-        selected_folders = ['1um_numpy']
+        selected_folders = ['210nm_numpy']
         post_fix = ""
 
         dataset = IRDropDataset5nm(root_path=root_path,
@@ -206,4 +205,4 @@ if __name__ =='__main__':
         print('error_indices : ',error_indices)
 
 
-    test_dataset(26)
+    test_new_data_error()

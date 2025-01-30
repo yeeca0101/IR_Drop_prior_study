@@ -12,14 +12,14 @@ CUDA_VISIBLE_DEVICES=1 python3 train_vqvae.py --lr 5e-4 --batch_size 2 --repeat 
     --weight_decay 1e-3 \
     --scheduler cosineanealing \
     --epoch 750 \
-    --save_folder checkpoint/3ch/attnv6/cus_new/ssim_dice_mse \
-    --arch attnv6 \
+    --save_folder checkpoint/3ch/attnv6_1/cus_new/ms_ssim_mae_ec_ssim_dice \
+    --arch attnv6_1 \
     --in_ch 3 \
-    --loss ssim_dice_mse \
+    --loss ms_ssim_mae_ec_ssim_dice \
     --dice_q 0.99 \
     --img_size 256 \
-    --use_ema False \
-    --post_fix 1um/embed64/relu \
+    --post_fix 1um/embed64/swisht \
+    --num_embeddings 64 \
     --dbu_per_px 1um \
     # --checkpoint_path checkpoint/2ch/attnv5/asap7/ssim_mae/default/adamw/b1
     # --use_raw True
