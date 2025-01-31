@@ -154,6 +154,10 @@ class LossSelect(nn.Module):
             loss_fn = FSIMLoss()
         elif self.loss_type == 'dice':
             loss_fn = IRDiceLoss(self.dice_q)
+        elif self.loss_type == 'aice':
+            loss_fn = AvgQIRDiceLoss()
+        elif self.loss_type == 'pice':
+            loss_fn = ProdQIRDiceLoss()
         elif self.loss_type in ['kl', 'js', 'wasserstein', 'correlation', 'histogram_matching','kl_restoration']:
             loss_fn = PixelDistributionLoss(loss_type=self.loss_type)
         elif self.loss_type == 'ec_ssim': # Error-Centric SSIM Loss (EC-SSIM Loss)
@@ -172,6 +176,14 @@ class LossSelect(nn.Module):
                 'loss_2':[0.1,'ec_ssim'],
                 'loss_3':[0.4,'mae'],
                 'loss_3':[0.1,'dice'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_mae_ec_ssim_pice':
+            self.lambda_fn_dict={
+                'loss_1':[0.4,'ms_ssim'],
+                'loss_2':[0.1,'ec_ssim'],
+                'loss_3':[0.4,'mae'],
+                'loss_3':[0.1,'pice'],
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_ec_ssim':
@@ -362,20 +374,21 @@ class MultiTaskLoss(nn.Module):
         super().__init__()
         self.loss_type = loss_type
         self.criterion_recon = LossSelect(loss_type,dice_q=dice_q)
-        self.criterion_loc = IRDiceLoss(q=dice_q)
+        self.criterion_loc = ProdQIRDiceLoss() # IRDiceLoss(q=dice_q)
         self.criterion_error = nn.MSELoss()
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
 
     def forward(self,outputs,targets):
-        x_recon, loc_hat, error_hat = outputs['x_recon'],outputs['loc'],outputs['error']
-        error_true = targets - x_recon
+        # x_recon, loc_hat, error_hat = outputs['x_recon'],outputs['loc'],outputs['error']
+        x_recon, loc_hat= outputs['x_recon'],outputs['loc']
+        # error_true = targets - x_recon
         loss_recon = self.criterion_recon(x_recon,targets)
         loss_loc = self.criterion_loc(loc_hat,targets)
-        loss_error = self.criterion_error(error_hat,error_true)
+        # loss_error = self.criterion_error(error_hat,error_true)
 
-        return loss_recon * self.alpha + loss_loc * self.beta + loss_error * self.gamma
+        return loss_recon * self.alpha + loss_loc * self.beta
 
 ############ Scaling ############################
 # def min_max_norm(x):

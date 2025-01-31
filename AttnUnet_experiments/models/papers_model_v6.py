@@ -156,7 +156,7 @@ class AttnUnetV6_1(nn.Module):
     
 class AttnUnetV6_2(nn.Module):
     def __init__(self, in_ch=3, out_ch=1, dropout_name='', dropout_p=0.5,
-                num_embeddings=512, act=SwishT(),**kwargs):
+                num_embeddings=512, act=SwishT(),distance='l2',**kwargs):
         super().__init__()
 
         in_channels = [12, 32, 64, 128, 256, 512]
@@ -177,7 +177,7 @@ class AttnUnetV6_2(nn.Module):
         self.bottleneck = DoubleConv(in_ch=in_channels[4], out_ch=in_channels[5], dropout_m=self.drop_out[dropout_name], dropout_p=dropout_p,act=self.act)
 
         # VectorQuantizer 추가
-        self.vq = VectorQuantiser(num_embeddings, in_channels[5], 0.25, distance='l2', 
+        self.vq = VectorQuantiser(num_embeddings, in_channels[5], 0.25, distance=distance, 
                                     anchor='probrandom', first_batch=False, contras_loss=True)
 
 
@@ -193,8 +193,8 @@ class AttnUnetV6_2(nn.Module):
 
 
         # multi task head
-        self.head_base_loc_error = nn.Conv2d(in_channels[1], 3, kernel_size=1, stride=1, padding=0, bias=False)
-        self.head_out =  nn.Conv2d(2, 1, kernel_size=1, stride=1, padding=0, bias=False)
+        self.head_logit_loc = nn.Conv2d(in_channels[1], 2, kernel_size=1, stride=1, padding=0, bias=False)
+        # self.head_out =  nn.Conv2d(2, 1, kernel_size=1, stride=1, padding=0, bias=False)
         
         
 
@@ -221,16 +221,14 @@ class AttnUnetV6_2(nn.Module):
         attn4 = self.attn4(x1, up3)  
         up4 = self.up4(attn4, up3)   
 
-        out_base = self.head_base_loc_error(up4) # B, 3, H, W
-        base, loc, error = out_base[:, 0], out_base[:, 1], out_base[:, 2].unsqueeze(1)
-        output = self.head_out(torch.stack([base,loc],dim=1)) + error
+        logit_loc = self.head_logit_loc(up4) # B, 3, H, W
+        output, loc = logit_loc[:, 0], logit_loc[:, 1]
         
         return {
-            'x_recon': output, 
+            'x_recon': output.unsqueeze(1), 
             'dictionary_loss': dict_loss, 
             'commitment_loss': 0,
             'loc':loc.unsqueeze(1),
-            'error':error
         }
     
 if __name__ == '__main__':
@@ -244,7 +242,7 @@ if __name__ == '__main__':
     output = model(inp)
     print(f"Output shape: {output['x_recon'].shape}")
     print(f"loc shape: {output['loc'].shape}")
-    print(f"error shape: {output['error'].shape}")
+    # print(f"error shape: {output['error'].shape}") # 6_2 legacy
     print(f"Dictionary Loss: {output['dictionary_loss']}")
     print(f"Commitment Loss: {output['commitment_loss']}")
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
