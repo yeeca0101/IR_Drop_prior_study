@@ -54,7 +54,7 @@ parser.add_argument('--post_fix', type=str, default='', help='post fix of finetu
 parser.add_argument('--scheduler', type=str, default='consineanealingwarmup', help='lr scheduler')
 parser.add_argument('--cross_val', type=bool, default=False, help='for asap7 dataset training')
 parser.add_argument('--pdn_zeros', type=bool, default=False, help='eff_dist, pdn_density channels zeros')
-parser.add_argument('--in_ch', type=int, default=12, help='1 : only use current map')
+parser.add_argument('--in_ch', type=int, default=12, help='1 : only use current map or auto_encoder mode')
 parser.add_argument('--img_size', type=int, default=512, help='input img_size')
 parser.add_argument('--mixed_precision', type=bool, default=False, help='mixed_precision')
 parser.add_argument('--monitor', type=str, default='f1', help='monitor metric')
@@ -65,6 +65,7 @@ parser.add_argument('--use_ema', action='store_true', help='vq ema')
 parser.add_argument('--dbu_per_px', type=str, default='1um', help='210nm or 1um')
 parser.add_argument('--checkpoint_path', type=str, default='', help='')
 parser.add_argument('--num_embeddings', type=int, default=512, help='number of codebooks vector')
+parser.add_argument('--auto_encoder', action='store_true', help='auto encoder mode ')
 
 args = parser.parse_args()
 
@@ -78,6 +79,8 @@ class IRDropPrediction(LightningModule):
         self.num_workers=4
         self.use_ema = args.use_ema
 
+        self.train_auto_encoder = True if args.auto_encoder else False
+
         self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)
         if args.finetune:
             self.model = init_weights_chkpt(self.model,args.save_folder)
@@ -86,47 +89,69 @@ class IRDropPrediction(LightningModule):
         else:
             init_weights(self.model)
 
-        self.criterion = MultiTaskLoss( loss_type=args.loss,
-                                    use_cache=True if args.loss == 'cache' else False,
-                                    dice_q=args.dice_q,
-                                    loss_with_logit=args.loss_with_logit,
-                                    post_min_max=args.post_min_max
-
-                                )
-        
+        if not self.train_auto_encoder:
+            self.criterion = MultiTaskLoss( loss_type=args.loss,
+                                        use_cache=True if args.loss == 'cache' else False,
+                                        dice_q=args.dice_q,
+                                        loss_with_logit=args.loss_with_logit,
+                                        post_min_max=args.post_min_max
+                                    )
+        else:
+            self.criterion = LossSelect( loss_type=args.loss,
+                                        use_cache=True if args.loss == 'cache' else False,
+                                        dice_q=args.dice_q,
+                                        loss_with_logit=args.loss_with_logit,
+                                        post_min_max=args.post_min_max
+                                    )
+            
         print(self.criterion.loss_type)
         print('use ema : ', self.use_ema)
         self.metrics = IRDropMetrics(loss_with_logit=args.loss_with_logit,post_min_max=args.post_min_max)
         # self.save_hyperparameters()
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x,target_hw):
+        return self.model(x,target_hw)
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self(inputs)
-        dictionary_loss = outputs['dictionary_loss']
-        recon_loss = self.criterion(outputs, targets)
+        outputs = self(inputs,targets.shape[-2:])
+        if not self.train_auto_encoder:
+            dictionary_loss = outputs['dictionary_loss']
+        else: 
+            dictionary_loss = 0
+            outputs = outputs['x_recon']
 
+        recon_loss = self.criterion(outputs, targets)
         loss = recon_loss + dictionary_loss
 
-        metrics = self.metrics.compute_metrics(outputs['x_recon'] , targets)
+        metrics = self.metrics.compute_metrics(outputs , targets)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('train_mae', metrics['mae'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        if self.train_auto_encoder:
+            self.log('val_ssim', metrics['ssim'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        else:
+            self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self(inputs)
-        dictionary_loss = outputs['dictionary_loss']
+        outputs = self(inputs,targets.shape[-2:])
+        if not self.train_auto_encoder:
+            dictionary_loss = outputs['dictionary_loss']
+        else: 
+            dictionary_loss = 0
+            outputs = outputs['x_recon']
+
         recon_loss = self.criterion(outputs, targets)
 
         loss = recon_loss + dictionary_loss
 
-        metrics = self.metrics.compute_metrics(outputs['x_recon'], targets)
+        metrics = self.metrics.compute_metrics(outputs, targets)
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log('val_f1', metrics['f1'], on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        if self.train_auto_encoder:
+            self.log('val_ssim', metrics['ssim'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        else:
+            self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('val_mae', metrics['mae'], on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
@@ -155,28 +180,7 @@ class IRDropPrediction(LightningModule):
         else:
             raise ValueError(f'Scheduler {args.scheduler} is not supported')
 
-        # if not self.use_ema:
-        #     # Configure VQ optimizer and scheduler
-        #     optimizer_vq = optim.Adam(quantizer_params, lr=args.vq_lr, weight_decay=0)
-        #     scheduler_vq = optim.lr_scheduler.StepLR(optimizer_vq, step_size=10, gamma=0.5)
-            
-        #     return [
-        #         {
-        #             "optimizer": optimizer_network,
-        #             "lr_scheduler": {
-        #                 "scheduler": scheduler_network,
-        #                 "monitor": "val_mae"
-        #             }
-        #         },
-        #         {
-        #             "optimizer": optimizer_vq,
-        #             "lr_scheduler": {
-        #                 "scheduler": scheduler_vq,
-        #                 "monitor": "val_mae"
-        #             }
-        #         }
-        #     ]
-        # else:
+       
         return {
             "optimizer": optimizer_network,
             "lr_scheduler": {
@@ -218,7 +222,8 @@ class IRDropPrediction(LightningModule):
                                                                         use_raw=args.use_raw,
                                                                         in_ch=args.in_ch,
                                                                         train=True,
-                                                                        selected_folders=selected_folders
+                                                                        selected_folders=selected_folders,
+                                                                        train_auto_encoder = self.train_auto_encoder
                                                                                    )
             else:
                 raise NameError('check dataset name')
@@ -278,6 +283,7 @@ class CustomCheckpoint(Callback):
                         'epoch': trainer.current_epoch,
                         'mae': trainer.callback_metrics.get('val_mae', None),
                         'f1': trainer.callback_metrics.get('val_f1', None),
+                        'ssim': trainer.callback_metrics.get('val_ssim',None)
                     }
                     if self.best_model_file_name:
                         old_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
@@ -308,9 +314,7 @@ def main(i):
     logdir = make_logdir()
     logger = TensorBoardLogger(save_dir=logdir, name=f'')
     
-    if args.monitor == 'mae':
-        monitor_metric = 'val_mae'  
-    else: monitor_metric = 'val_f1'
+    monitor_metric = f'val_{args.monitor}'  
     print('monitor : ',monitor_metric)
 
     checkpoint_callback = CustomCheckpoint(

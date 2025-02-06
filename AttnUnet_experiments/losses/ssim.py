@@ -277,7 +277,6 @@ class SSIMLoss(torch.nn.Module):
         self.nonnegative_ssim = nonnegative_ssim
 
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
-        Y = Y.unsqueeze(1)
         return 1.-ssim(
             X,
             Y,
@@ -321,7 +320,6 @@ class MS_SSIMLoss(torch.nn.Module):
         self.K = K
 
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
-        Y = Y.unsqueeze(1)
         return 1- ms_ssim(
             X,
             Y,
@@ -367,7 +365,6 @@ class IW_SSIMLoss(torch.nn.Module):
         self.nonnegative_ssim = nonnegative_ssim
 
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
-        Y = Y.unsqueeze(1)
         ssim_map = ssim(
             X,
             Y,
@@ -474,9 +471,9 @@ class FSIMLoss(nn.Module):
         """
         Calculate FSIM between X and Y.
         """
-        if not X.shape == Y.shape:
-            # raise ValueError(f"Input images should have the same dimensions, but got {X.shape} and {Y.shape}.")
-            Y = Y.unsqueeze(1)
+        # if not X.shape == Y.shape:
+        #     # raise ValueError(f"Input images should have the same dimensions, but got {X.shape} and {Y.shape}.")
+        #     Y = Y.unsqueeze(1)
 
         # Calculate Phase Congruency (PC) using Fourier transform
         pc_X = self.phase_congruency(X)

@@ -36,7 +36,12 @@ def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img
         if split == 'test':
             dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])                 
         else : dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])[1]
-        print(f'cus_1um : {split}')
+    elif dt == 'cus_super':       
+        # TODO
+        # if split == 'test':
+        #     dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])                 
+        dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,train_auto_encoder=True)[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,train_auto_encoder=True)[1]
+        print(f'cus_super_resolutoin : {split}')
     elif dt == 'asap7_fine':
         dataset = TestASAP7Dataset(root_path='/data/real-circuit-benchmarks/asap7/numpy_data',
                                    target_layers=['m2', 'm5', 'm6', 'm7', 'm8', 'm25', 'm56', 'm67', 'm78'],

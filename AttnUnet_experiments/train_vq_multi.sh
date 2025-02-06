@@ -3,24 +3,25 @@
 # 1e3, 1e3
 # fine 5e4, 1e3
 
-CUDA_VISIBLE_DEVICES=3 python3 train_vq_multi_task.py --lr 5e-4 --batch_size 2 --repeat 1 \
+CUDA_VISIBLE_DEVICES=2 python3 train_vq_multi_task.py --lr 5e-4 --batch_size 1 --repeat 1 \
     --gpus 1 \
     --log_dir logs \
-    --monitor f1 \
+    --monitor ssim \
     --dataset cus \
     --optim adamw \
-    --weight_decay 1e-2 \
+    --weight_decay 1e-3 \
     --scheduler cosineanealing \
     --epoch 750 \
-    --save_folder checkpoint/test/multi2/3ch/attnv6_2/cus_new/ms_ssim_mae_ec_ssim_dice \
-    --arch attnv6_2 \
-    --in_ch 3 \
-    --loss ms_ssim_mae_ec_ssim_dice \
+    --save_folder checkpoint/auto_encodoer/sr_v2/cus_new/ms_ssim_mae \
+    --arch sr_v2 \
+    --in_ch 1 \
+    --loss ms_ssim_mae \
     --dice_q 0.99 \
     --img_size 256 \
-    --post_fix 1um/embed64/pice \
     --num_embeddings 64 \
-    --dbu_per_px 1um \
+    --auto_encoder
+    # --dbu_per_px 1um \
+    # --post_fix  \
     # --checkpoint_path checkpoint/2ch/attnv5/asap7/ssim_mae/default/adamw/b1
     # --use_raw True
     # --post_min_max True \

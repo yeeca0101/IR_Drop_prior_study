@@ -18,9 +18,9 @@ CUDA_VISIBLE_DEVICES=3 python3 train_vqvae.py --lr 5e-4 --batch_size 2 --repeat 
     --loss ms_ssim_mae_ec_ssim_pice \
     --dice_q 0.99 \
     --img_size 256 \
-    --post_fix 1um/embed512/swisht \
-    --num_embeddings 512 \
-    --dbu_per_px 1um \
+    --post_fix 210nm/embed64/swisht \
+    --num_embeddings 64 \
+    --dbu_per_px 210nm \
     # --checkpoint_path checkpoint/2ch/attnv5/asap7/ssim_mae/default/adamw/b1
     # --use_raw True
     # --post_min_max True \

@@ -799,7 +799,7 @@ def build_dataset(root_path='/data/BeGAN-circuit-benchmarks',img_size=512,train=
 
 ############ 5nm ###########################################################
 def build_dataset_5m(img_size=256,train=True,
-                 in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',]):
+                 in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',],train_auto_encoder=False):
 
     root_path = "/data/gen_pdn"
     post_fix = ""
@@ -809,12 +809,30 @@ def build_dataset_5m(img_size=256,train=True,
                                 selected_folders=selected_folders,
                                 post_fix_path=post_fix,
                                 in_ch=in_ch,
-                                use_raw=use_raw)
+                                use_raw=use_raw,
+                                train_auto_encoder=train_auto_encoder)
     print(dataset.__len__())
     if train:
         return split_train_val(dataset,)
     else:
         return dataset
+
+
+def build_dataset_5m_auto(img_size=256,use_raw=False,train=True):
+    root_path = "/data/gen_pdn"
+    selected_folders = ['1um_numpy','210nm_numpy']
+    post_fix = ""
+    dataset = IRDropDataset5nm(root_path=root_path,
+                               img_size=img_size,
+                                selected_folders=selected_folders,  # 내부에서 고정됨
+                                post_fix_path=post_fix,
+                                train=train,
+                                in_ch=1,
+                                train_auto_encoder=True,
+                                use_raw=use_raw)
+    print(dataset.__len__())
+    return dataset
+
 
 def build_dataset_5m_test(img_size=256,
                  in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',]):

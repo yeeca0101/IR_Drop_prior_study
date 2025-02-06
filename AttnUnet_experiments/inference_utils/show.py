@@ -15,7 +15,7 @@ from models import *
 def predict_and_visualize(dataset, model, checkpoint_path,
                           index, cols=4, colorbar=False,
                           norm_out=False, device='cuda:0',
-                          casename=False, cmap='inferno',use_raw=False):
+                          casename=False, cmap='inferno',use_raw=False,sr=False):
 
     checkpoint_path = find_pth_files(checkpoint_path)
     model.eval()
@@ -30,8 +30,8 @@ def predict_and_visualize(dataset, model, checkpoint_path,
     model.to(device)
 
     with torch.no_grad():
-        pred = model(inp_batch)
-    if len(pred) >= 3: 
+        pred = model(inp_batch) if not sr else model(inp_batch, target.shape[-2:])
+    if len(pred) >= 1: 
         pred = pred['x_recon']
     pred = pred.detach().cpu() 
 
@@ -70,7 +70,7 @@ def predict_and_visualize(dataset, model, checkpoint_path,
         else:
             im = ax.imshow(img, cmap=cmap, vmin=0, vmax=1) # if colorbar else ax.imshow(img, cmap=cmap)
         ax.set_title(title)
-        ax.axis('off')
+        # ax.axis('off')
         if colorbar and (i > len(titles)-4):
             fig.colorbar(im, ax=ax)
 
@@ -208,7 +208,7 @@ def get_num_embeddings(state_dict):
             return value.shape[0]
     return None
 
-def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14):
+def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3):
     # Setup plot grid dimensions
     rows = len(checkpoint_paths) + 1
     cols = len(sample_indices)
@@ -259,6 +259,12 @@ def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices,
                         kwargs = {'act':nn.ReLU()}
                     else : kwargs = {}
                     model = AttnUnetV6_1(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings,**kwargs)
+                elif 'attnv6_2' in version:
+                    if 'swisht' not in checkpoint_path:
+                        import torch.nn as nn
+                        kwargs = {'act':nn.ReLU()}
+                    else : kwargs = {}
+                    model = AttnUnetV6_2(in_ch=1, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings,**kwargs)
                 elif 'attnv6' in version:
                     model = AttnUnetV6(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
             except:
