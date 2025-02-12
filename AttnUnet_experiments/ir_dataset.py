@@ -12,7 +12,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from sklearn.model_selection import KFold
 
-from ir_dataset_5nm import IRDropDataset5nm
+from ir_dataset_5nm import IRDropDataset5nm, IRDropInferenceAutoencoderDataset5nm
 
 class IRDropDataset(Dataset):
     def __init__(self, root_path, selected_folders, target_layers, 
@@ -801,7 +801,8 @@ def build_dataset(root_path='/data/BeGAN-circuit-benchmarks',img_size=512,train=
 def build_dataset_5m(img_size=256,train=True,
                  in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',],train_auto_encoder=False):
 
-    root_path = "/data/gen_pdn"
+    # root_path = "/data/gen_pdn" 2025.02.12 -> 4types data path
+    root_path = '/data/pdn_3rd_4types'
     post_fix = ""
     dataset = IRDropDataset5nm(root_path=root_path,
                                img_size=img_size,
@@ -810,7 +811,17 @@ def build_dataset_5m(img_size=256,train=True,
                                 post_fix_path=post_fix,
                                 in_ch=in_ch,
                                 use_raw=use_raw,
-                                train_auto_encoder=train_auto_encoder)
+                                )
+    if train_auto_encoder:
+        dataset = IRDropInferenceAutoencoderDataset5nm(
+                                root_path=root_path,
+                               img_size=img_size,
+                               train=train,
+                                selected_folders=selected_folders,
+                                post_fix_path=post_fix,
+                                in_ch=in_ch,
+                                use_raw=use_raw
+        )
     print(dataset.__len__())
     if train:
         return split_train_val(dataset,)
@@ -830,6 +841,7 @@ def build_dataset_5m_auto(img_size=256,use_raw=False,train=True):
                                 in_ch=1,
                                 train_auto_encoder=True,
                                 use_raw=use_raw)
+    
     print(dataset.__len__())
     return dataset
 
@@ -1120,4 +1132,28 @@ if __name__ =='__main__':
     def test_8_5nm():
         td, vd = build_dataset_5m()
 
-    test_8_5nm()
+
+    root_path = "/data/pdn_3rd_4types" # fine 
+    selected_folders = ['200nm_numpy']
+    post_fix = ""
+    dataset = IRDropDataset5nm(root_path=root_path,
+                               img_size=256,
+                               train=True,
+                                selected_folders=selected_folders,
+                                post_fix_path=post_fix,
+                                in_ch=3,
+                                use_raw=False,
+                                train_auto_encoder=False)
+    
+    root_path = '/data/pdn_3rd_4types'
+    selected_folders = ['200nm_numpy']
+    post_fix = ""
+
+    dataset = IRDropDataset5nm(root_path=root_path,
+                                selected_folders=selected_folders,
+                                post_fix_path=post_fix,
+                                train=True,
+                                in_ch=3)
+    print(dataset.__len__())
+
+    

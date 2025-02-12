@@ -92,13 +92,26 @@ class DatasetConverter:
 
         return matrix
 
+
+# ref : ML-for-IR-drop repository
+# Unit distance microns : 2000
+DBU_PER_PIXEL_DICT = {
+    '1um' : 2000,
+    '500nm' : 1000,
+    '200nm' : 400,
+    '100nm' : 200,
+    '210nm' : 420,  # legacy
+}
+
+
 if __name__ == '__main__':
     # Main Execution
-    base_path = "/data/gen_pdn/pdn_data_3rd"
-    resolution_folders = ["1um",'210nm']  # or "210nm"
+    base_path = "/data/pdn_3rd_4types"
+    resolution_folders = ["1um", "200nm", "500nm", "100nm"]
+    # resolution_folders = ["1um",'210nm']  # or "210nm"
 
     for resolution_folder in resolution_folders:
-        dbu_per_pixel = 2000 if resolution_folder == "1um" else 420
+        dbu_per_pixel = DBU_PER_PIXEL_DICT[resolution_folder]
 
         converter = DatasetConverter(base_path, resolution_folder, dbu_per_pixel)
         converter.convert_csv_to_npy()

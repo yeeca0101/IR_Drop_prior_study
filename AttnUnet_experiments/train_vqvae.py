@@ -213,8 +213,7 @@ class IRDropPrediction(LightningModule):
                                                                                     use_raw=args.use_raw
                                                                                    )
             elif args.dataset.lower() == 'cus':
-                sup_folders = ['210nm_numpy','1um_numpy']
-                selected_folders = [sup_folders[0]] if '210nm' in args.dbu_per_px else  [sup_folders[1]] if '1um' in args.dbu_per_px else sup_folders
+                selected_folders = [f'{args.dbu_per_px}_numpy']
                 print('selected folders : ',selected_folders)
                 self.train_dataset, self.val_dataset = build_dataset_5m(img_size=args.img_size,
                                                                         use_raw=args.use_raw,

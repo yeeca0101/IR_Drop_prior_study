@@ -17,7 +17,7 @@ from metric import IRDropMetrics
 from models import *
 
 
-def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False):
+def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False,types='1um'):
     if dt == 'iccad_train':
         dataset=build_dataset_iccad(pdn_zeros=pdn_zeros,in_ch=in_ch,img_size=img_size,use_raw=use_raw)[0] if  split == 'train' else build_dataset_iccad(pdn_zeros=pdn_zeros,in_ch=in_ch,img_size=img_size,use_raw=use_raw)[1]
         print(f'iccad_pretrain {split}')
@@ -27,11 +27,11 @@ def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img
     elif dt == 'asap7_train_val':                        
         dataset=build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[0] if  split == 'train' else build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[1]
         print(f'asap7_train_val : {split}')
-    elif dt == 'cus_210nm':  
-        if split == 'test':
-            dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])                        
-        else: dataset=build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[0] if  split == 'train' else build_dataset_5m(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['210nm_numpy'])[1]
-        print(f'cus_210nm : {split}')
+    elif dt == 'cus':  
+        train_dt,val_dt = build_dataset_5m(img_size=img_size,train=True,in_ch=in_ch,use_raw=use_raw,selected_folders=[f'{types}_numpy'])
+        if split =='train':
+            return train_dt
+        else: return val_dt
     elif dt == 'cus_1um':       
         if split == 'test':
             dataset=build_dataset_5m_test(in_ch=in_ch,img_size=img_size,use_raw=use_raw,selected_folders=['1um_numpy'])                 
