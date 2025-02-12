@@ -24,7 +24,7 @@ class DiceLoss(nn.Module):
             mask = torch.ones_like(pred)
         
         # Apply sigmoid to predictions
-        pred = torch.sigmoid(pred) # 이거 쓰면 예제에서 0.655가 최대 coeff
+        # pred = torch.sigmoid(pred) # 이거 쓰면 예제에서 0.655가 최대 coeff
         
         # Multiply pred and target by mask
         pred = pred * mask

@@ -105,9 +105,8 @@ class LossSelect(nn.Module):
 
         if use_cache:
             lambda_fn_dict = {
-                '1000':[0.5,'ssim'], # min_max (target), (pred)
-                'min_max':[0.2,'mae'],     # target*1,000
-                'dice' : [0.3,'dice']
+                '1000':[1000,'default'], # min_max (target), (pred)
+                'dice' : [0.1,'dice']
                 # 'linear'              # x=x
             }
             print('use cache dict : ',lambda_fn_dict)
@@ -184,6 +183,14 @@ class LossSelect(nn.Module):
                 'loss_2':[0.1,'ec_ssim'],
                 'loss_3':[0.4,'mae'],
                 'loss_3':[0.1,'pice'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_mae_ec_ssim_aice':
+            self.lambda_fn_dict={
+                'loss_1':[0.4,'ms_ssim'],
+                'loss_2':[0.1,'ec_ssim'],
+                'loss_3':[0.4,'mae'],
+                'loss_3':[0.1,'aice'],
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_ec_ssim':

@@ -70,7 +70,7 @@ class IRDropPrediction(LightningModule):
         super().__init__()
         self.lr = lr
         self.num_workers = 4 if args.dataset.lower() == 'began' else 0
-        self.num_workers=4
+        self.num_workers=2
         self.use_ema = args.use_ema
 
         self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)

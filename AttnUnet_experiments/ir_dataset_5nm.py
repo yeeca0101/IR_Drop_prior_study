@@ -373,7 +373,7 @@ class IRDropInferenceAutoencoderDataset5nm(IRDropDataset5nm):
         - 'hr_ori_shape' : 210nm ir_drop의 원본 해상도 (H, W)
         """
         # 1. LR 데이터 (원본 해상도)
-        lr_input_data, lr_ir_drop = self.load_data_fn(idx)
+        lr_input_data, lr_ir_drop = self.load_data_fn(idx) # min_max 적용된 ir drop
         lr_ori_shape = lr_ir_drop.shape[:2]  # 원본 해상도 저장
 
         # Transform 적용하지 않은 lr_target_ori 추가
