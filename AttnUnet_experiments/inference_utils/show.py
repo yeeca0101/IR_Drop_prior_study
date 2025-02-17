@@ -209,7 +209,7 @@ def get_num_embeddings(state_dict):
             return value.shape[0]
     return None
 
-def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3,colorbar=False):
+def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3,colorbar=False,vmin=0,vmax=1):
     # Setup plot grid dimensions
     rows = len(checkpoint_paths) + 1
     cols = len(sample_indices)
@@ -228,7 +228,10 @@ def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices
         inp, target = sample[0], sample[1]
 
         # Plot Ground Truth (GT)
-        axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=0,vmax=1)
+        if vmin == 'auto':
+            axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=target.squeeze().cpu().numpy().min(),vmax=target.squeeze().cpu().numpy().max())
+        else:
+            axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=vmin,vmax=vmax)
         axes[0, col_idx].set_title(f"GT (Index {idx})",fontsize=fontsize+5)
         axes[0, col_idx].axis('off')
 
@@ -342,7 +345,10 @@ def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices
                 raise ValueError(f'{checkpoint_path} not match {inp_batch.shape} or {channels}')
             
             # Plot predictions
-            im = axes[current_row, col_idx].imshow(pred.squeeze().numpy(), cmap=cmap,vmin=0,vmax=1)
+            if vmin == 'auto':
+                im = axes[current_row, col_idx].imshow(pred.squeeze().numpy(), cmap=cmap,vmin=pred.squeeze().numpy().min(),vmax=pred.squeeze().numpy().max())
+            else:
+                im = axes[current_row, col_idx].imshow(pred.squeeze().numpy(), cmap=cmap,vmin=vmin,vmax=vmax)
             axes[current_row, col_idx].set_title(f"{version.split('attn')[-1]}, {channels}, {loss}",fontsize=fontsize)
             axes[current_row, col_idx].axis('off')
             if colorbar:fig.colorbar(im,ax=axes[current_row, col_idx])

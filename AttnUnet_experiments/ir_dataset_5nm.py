@@ -11,6 +11,18 @@ import torch.nn.functional as F
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+
+'''
+    v2 dataset :
+    IR Drop
+        "mean": 0.001601,
+        "std": 0.002327,
+        "min": 0.0,
+        "max": 0.025038
+'''
+IR_DROP_MEAN = 0.001601 
+IR_DROP_STD = 0.002327
+
 class IRDropDataset5nm(Dataset):
     def __init__(self, root_path, selected_folders,
                  img_size=256, post_fix_path='', train=True,
@@ -121,13 +133,13 @@ class IRDropDataset5nm(Dataset):
                 'pad_distance': pad_distance
             })
         
-        print(f'__load_data_files : {len(self.data_files)} found.')
+        # print(f'__load_data_files : {len(self.data_files)} found.')
 
     def _load_data_from_disk_2ch(self, idx):
         file_group = self.data_files[idx]
         current = self._norm(np.load(file_group['current']))
         ir_drop = np.load(file_group['ir_drop'])
-        ir_drop = self._min_max_norm(ir_drop) if not self.use_raw else ir_drop
+        ir_drop = self._zscore_norm(ir_drop) if not self.use_raw else ir_drop
         if ir_drop.ndim == 2:
             ir_drop = np.expand_dims(ir_drop, axis=-1)
 
@@ -190,7 +202,7 @@ class IRDropDataset5nm(Dataset):
         input_data = np.stack([current, pad_distance] + resistance_maps, axis=-1)
         
         ir_drop = np.load(file_group['ir_drop'])
-        ir_drop = self._min_max_norm(ir_drop) if not self.use_raw else ir_drop
+        ir_drop = self._zscore_norm(ir_drop) if not self.use_raw else ir_drop
         if ir_drop.ndim == 2:
             ir_drop = np.expand_dims(ir_drop, axis=-1)
         return input_data, ir_drop
@@ -217,6 +229,9 @@ class IRDropDataset5nm(Dataset):
 
     def _min_max_norm(self, x):
         return (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x
+
+    def _zscore_norm(self,x): # for ir drop
+        return (x - IR_DROP_MEAN) / IR_DROP_STD
 
     def _combine_3ch_data(self, current, pad_distance, resistance_total):
         return np.stack([current, pad_distance, resistance_total], axis=-1)
