@@ -799,10 +799,8 @@ def build_dataset(root_path='/data/BeGAN-circuit-benchmarks',img_size=512,train=
 
 ############ 5nm ###########################################################
 def build_dataset_5m(img_size=256,train=True,
-                 in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',],train_auto_encoder=False):
+                 in_ch=2,use_raw=False,selected_folders = ['210nm_numpy',],train_auto_encoder=False,root_path = '/data/pdn_3rd_4types'):
 
-    # root_path = "/data/gen_pdn" 2025.02.12 -> 4types data path
-    root_path = '/data/pdn_3rd_4types'
     post_fix = ""
     dataset = IRDropDataset5nm(root_path=root_path,
                                img_size=img_size,

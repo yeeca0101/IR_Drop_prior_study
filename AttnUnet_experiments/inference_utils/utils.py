@@ -17,7 +17,7 @@ from metric import IRDropMetrics
 from models import *
 
 
-def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False,types='1um'):
+def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False,types='1um',root_path=None):
     if dt == 'iccad_train':
         dataset=build_dataset_iccad(pdn_zeros=pdn_zeros,in_ch=in_ch,img_size=img_size,use_raw=use_raw)[0] if  split == 'train' else build_dataset_iccad(pdn_zeros=pdn_zeros,in_ch=in_ch,img_size=img_size,use_raw=use_raw)[1]
         print(f'iccad_pretrain {split}')
@@ -27,8 +27,9 @@ def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img
     elif dt == 'asap7_train_val':                        
         dataset=build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[0] if  split == 'train' else build_dataset_began_asap7(in_ch=in_ch,img_size=img_size,use_raw=use_raw)[1]
         print(f'asap7_train_val : {split}')
-    elif dt == 'cus':  
-        train_dt,val_dt = build_dataset_5m(img_size=img_size,train=True,in_ch=in_ch,use_raw=use_raw,selected_folders=[f'{types}_numpy'])
+    elif dt == 'cus':
+        kwargs = {'root_path':root_path} if root_path else {}  
+        train_dt,val_dt = build_dataset_5m(img_size=img_size,train=True,in_ch=in_ch,use_raw=use_raw,selected_folders=[f'{types}_numpy'],**kwargs)
         if split =='train':
             return train_dt
         else: return val_dt
@@ -96,7 +97,9 @@ def find_pth_files(folder_path, mode='max'):
 
 def visualize_images(inp, target, cols=4):
     # 입력 텐서와 타겟 텐서를 결합
-    all_images = torch.cat([inp, target.unsqueeze(0)], dim=0)
+    if target.dim==2:
+        target = target.unsqueeze(0)
+    all_images = torch.cat([inp, target], dim=0)
     
     # 행 수 계산
     rows = (len(all_images) + cols - 1) // cols

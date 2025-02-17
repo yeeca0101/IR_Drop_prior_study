@@ -70,7 +70,7 @@ class IRDropPrediction(LightningModule):
         super().__init__()
         self.lr = lr
         self.num_workers = 4 if args.dataset.lower() == 'began' else 0
-        self.num_workers=2
+        self.num_workers=4
         self.use_ema = args.use_ema
 
         self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)
@@ -296,7 +296,7 @@ def make_logdir():
         logdir = os.path.join(args.log_dir,f'{args.arch}/{args.dataset}/{pre_train_loss}')
         logdir = os.path.join(logdir,f'finetune/{args.loss}')
     else:
-        logdir = os.path.join(args.log_dir,f'{args.arch}/{args.vqvae_size}/{args.dataset}/{args.loss}')
+        logdir = os.path.join(args.log_dir,f'{args.in_ch}/{args.arch}/{args.dataset}/{args.loss}')
         if args.arch == 'attnv2':   logdir = os.path.join(logdir,args.dropout)
     
     if not args.loss_with_logit:logdir = os.path.join(logdir,'sigmoid')

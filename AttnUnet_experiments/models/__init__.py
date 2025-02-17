@@ -7,6 +7,8 @@ from .papers_model_v4 import AttnUnetV4
 from .papers_model_v5 import AttnUnetV5, AttnUnetV5_1,AttnUnetV5_2
 from .papers_model_v6 import AttnUnetV6, AttnUnetV6_1, AttnUnetV6_2, SwishT
 from .sr_models import *
+from .model_factory.resmlp_unet import ResMLP_UNet
+
 from .parts.vqvae import create_model
 
 
@@ -38,6 +40,9 @@ def build_model(arch,dropout_type,is_fintune,in_ch,use_ema,num_embeddings=512):
         model = SRModelV1(dropout_name=dropout_type,dropout_p=0.05 if is_fintune else 0.1, in_ch=in_ch)    
     elif arch == 'sr_v2':
         model = SRModelV2(in_ch=1, out_ch=1, upscale_factor=4, num_features=64, num_rrdb=8, growth_rate=32)
+
+    elif arch =='resmlp_unet':
+        model = ResMLP_UNet(in_ch=in_ch,base_dim=32)
     elif arch == 'vqvae': # legacy
         # model = create_model(args.vqvae_size,in_ch=in_ch,use_ema = use_ema) # vqvae 모델 생성 추가
         pass

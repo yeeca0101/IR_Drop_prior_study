@@ -209,16 +209,22 @@ def get_num_embeddings(state_dict):
             return value.shape[0]
     return None
 
-def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3,colorbar=False):
+def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3,colorbar=False):
     # Setup plot grid dimensions
     rows = len(checkpoint_paths) + 1
     cols = len(sample_indices)
     if plot_inputs:
         rows += len(plot_inputs)
 
+    first_checkpoint = find_pth_files(checkpoint_paths[0])
+    first_channels, version_first, loss_first = parse_checkpoint_path(first_checkpoint)
+    if first_channels not in datasets:
+        raise ValueError(f"Dataset for channel configuration '{first_channels}' not provided.")
+    base_dataset = datasets[first_channels]
+
     fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
     for col_idx, idx in enumerate(sample_indices):
-        sample = dataset.__getitem__(idx)
+        sample = base_dataset.__getitem__(idx)
         inp, target = sample[0], sample[1]
 
         # Plot Ground Truth (GT)
@@ -239,9 +245,10 @@ def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices,
             # Parse checkpoint information
             channels, version, loss = parse_checkpoint_path(checkpoint_path)
 
-            # Adjust input channels if checkpoint specifies 2ch
-            inp_channels = inp if channels != '2ch' else inp[[0, 2]]
-            inp_batch = inp_channels.unsqueeze(0).to(device)
+            cur_dataset = datasets[channels]
+            sample = cur_dataset[idx]
+            inp, target = sample[0], sample[1]
+            inp_batch = inp.unsqueeze(0).to(device)
             
             # Load checkpoint
             state_dict = torch.load(checkpoint_path)['net']
@@ -249,28 +256,76 @@ def plot_predictions_from_checkpoints(checkpoint_paths, dataset, sample_indices,
 
             # Initialize model
             try:
+                # channels가 "2ch", "3ch", ... 형태라고 가정하여 숫자 부분만 추출
+                in_channels = int(channels.replace("ch", ""))
+            except Exception as e:
+                raise ValueError(f"Invalid channel format: {channels}. Expected format like '2ch', '3ch', etc.")
+
+            try:
                 if 'attnv5_1' in version:
-                    model = AttnUnetV5_1(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
-                if 'attnv5_2' in version:
-                    model = AttnUnetV5_2(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
+                    model = AttnUnetV5_1(
+                        in_ch=in_channels, 
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings
+                    )
+                elif 'attnv5_2' in version:
+                    model = AttnUnetV5_2(
+                        in_ch=in_channels, 
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings
+                    )
                 elif 'attnv5' in version:
-                    model = AttnUnetV5(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
+                    model = AttnUnetV5(
+                        in_ch=in_channels, 
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings
+                    )
                 elif 'attnv6_1' in version:
                     if 'relu' in checkpoint_path:
                         import torch.nn as nn
-                        kwargs = {'act':nn.ReLU()}
-                    else : kwargs = {}
-                    model = AttnUnetV6_1(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings,**kwargs)
+                        kwargs = {'act': nn.ReLU()}
+                    else:
+                        kwargs = {}
+                    model = AttnUnetV6_1(
+                        in_ch=in_channels, 
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings,
+                        **kwargs
+                    )
                 elif 'attnv6_2' in version:
-                    if 'swisht' not in checkpoint_path:
+                    if 'relu' in checkpoint_path:
                         import torch.nn as nn
-                        kwargs = {'act':nn.ReLU()}
-                    else : kwargs = {}
-                    model = AttnUnetV6_2(in_ch=1, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings,**kwargs)
+                        kwargs = {'act': nn.ReLU()}
+                    else:
+                        kwargs = {}
+                    model = AttnUnetV6_2(
+                        in_ch=in_channels,  # 기존에 in_ch=1로 되어있던 부분을 in_channels로 변경
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings,
+                        **kwargs
+                    )
                 elif 'attnv6' in version:
-                    model = AttnUnetV6(in_ch=2 if channels == '2ch' else 3, out_ch=1, dropout_name='dropblock', dropout_p=0.3, num_embeddings=num_embeddings)
-            except:
-                raise ValueError(f'{checkpoint_path} not match {version} or embeddings : {num_embeddings}')
+                    model = AttnUnetV6(
+                        in_ch=in_channels, 
+                        out_ch=1, 
+                        dropout_name='dropblock', 
+                        dropout_p=0.3, 
+                        num_embeddings=num_embeddings
+                    )
+                else:
+                    raise ValueError("알 수 없는 version")
+            except Exception as e:
+                raise ValueError(f'{checkpoint_path} not match {version} or embeddings : {num_embeddings}') from e
 
             try:
                 model.load_state_dict(state_dict)
@@ -727,3 +782,172 @@ class InferencePipeline1umTo210nm:
         
         plt.tight_layout()
         plt.show()
+
+
+#####################################################################################
+# 2025.02.12
+# show inputs 1um ~ 100nm
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+def parse_resistance_title(file_path):
+    """
+    resistance 파일 경로에서 타이틀 문자열을 생성합니다.
+    예시)
+      "47_m0_resistance.npy"                -> "m0"
+      "47_m0_to_m1_via_resistance.npy"        -> "m0 to m1 via"
+    """
+    file_name = os.path.basename(file_path)            # 예: "47_m0_resistance.npy"
+    name_without_ext = os.path.splitext(file_name)[0]    # 예: "47_m0_resistance"
+    tokens = name_without_ext.split('_')
+    # 만약 첫 토큰이 순번(숫자)라면 제거
+    if tokens and tokens[0].isdigit():
+        tokens = tokens[1:]
+    # 'resistance' 토큰 제거
+    tokens = [t for t in tokens if t.lower() != 'resistance']
+    # (원한다면 metal layer의 경우 접두어 추가 가능)
+    title = " ".join(tokens)
+    return title
+
+def visualize_raw_input(dataset, idx=0, cmap='viridis', vmin=None, vmax=None, cols=5, show_target=True,colorbar=False,fontsize=20):
+    """
+    dataset: IRDropDataset5nm와 같은 데이터셋 인스턴스.
+    idx: 시각화할 샘플 인덱스.
+    cmap: matplotlib의 colormap (기본값 'viridis')
+    vmin, vmax: imshow에 전달할 최소/최대 값 (None이면 각 이미지의 min/max 사용)
+    cols: 한 행(row)에 표시할 subplot의 개수
+    show_target: True이면 target(ir_drop) 이미지도 subplot에 포함 (False이면 미포함)
+    
+    - dataset.data_files를 이용해 npy 파일들을 로드하며, 정규화 함수는 적용하지 않습니다.
+    - in_ch에 따라 입력 데이터(input_data)를 구성하고, 각 채널의 타이틀은 다음과 같이 지정됩니다.
+        * in_ch == 2:
+            - 채널 0: "current"
+            - 채널 1: "resistance total"
+        * in_ch == 3:
+            - 채널 0: "current"
+            - 채널 1: "pad distance"
+            - 채널 2: "resistance total"
+        * in_ch == 25:
+            - 채널 0: "current"
+            - 채널 1: "pad distance"
+            - 채널 2 이상: 해당 resistance 파일 경로에서 파싱한 타이틀
+    - show_target가 True인 경우 target 이미지도 마지막 subplot에 표시합니다.
+    """
+    # dataset.data_files에서 파일 그룹 불러오기
+    file_group = dataset.data_files[idx]
+    
+    # current와 ir_drop는 항상 로드
+    current = np.load(file_group['current'])
+    ir_drop = np.load(file_group['ir_drop'])
+    
+    # in_ch 값에 따라 input_data 구성
+    if dataset.in_ch == 2:
+        # resistance 파일들을 모두 로드 후 합산 → 단일 채널
+        resistance_stack = [np.load(res) for res in file_group['resistances']]
+        # resistance_total = np.stack(resistance_stack, axis=-1).sum(axis=-1)
+        # 채널 순서: current, resistance_total
+        input_data = np.stack([current] + resistance_stack, axis=-1)
+        
+    elif dataset.in_ch == 3:
+        pad_distance = np.load(file_group['pad_distance'])
+        resistance_stack = [np.load(res) for res in file_group['resistances']]
+        resistance_total = np.stack(resistance_stack, axis=-1).sum(axis=-1)
+        # 채널 순서: current, pad distance, resistance_total
+        input_data = np.stack([current, pad_distance, resistance_total], axis=-1)
+        
+    elif dataset.in_ch == 25:
+        pad_distance = np.load(file_group['pad_distance'])
+        resistance_maps = [np.load(res) for res in file_group['resistances']]
+        if len(resistance_maps) != 23:
+            raise ValueError(f"Expected 23 resistance maps, but got {len(resistance_maps)}")
+        # 채널 순서: current, pad distance, resistance_map1, ..., resistance_map23
+        input_data = np.stack([current, pad_distance] + resistance_maps, axis=-1)
+    else:
+        raise ValueError(f"Not support {dataset.in_ch} channels.")
+    
+    # 입력 채널 수
+    n_channels = input_data.shape[-1]
+    # target 이미지 포함 여부에 따라 총 플롯 개수 결정
+    total_plots = n_channels + 1 if show_target else n_channels
+    
+    # cols에 따라 행(row) 수 계산 (나머지 subplot은 숨김)
+    rows = (total_plots + cols - 1) // cols
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
+    # axes가 2D 배열일 경우 flatten
+    axes = np.array(axes).flatten()
+    
+    # 순서대로 subplot에 이미지 그리기
+    for i, ax in enumerate(axes):
+        if i < total_plots:
+            # 입력 채널인 경우
+            if i < n_channels:
+                image = input_data[..., i]
+                # vmin, vmax가 None이면 각 이미지의 최솟값/최댓값 사용
+                if None in [vmin, vmax]:
+                    im = ax.imshow(image, cmap=cmap, vmin=image.min(), vmax=image.max())
+                else:
+                    im = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+                
+                # 채널별 타이틀 지정
+                if dataset.in_ch == 2:
+                    if i == 0:
+                        title = "current"
+                    else:
+                        res_index = i - 1
+                        if res_index < len(file_group['resistances']):
+                            res_file = file_group['resistances'][res_index]
+                            title = parse_resistance_title(res_file)
+                        else:
+                            title = f"res_{res_index}"
+                elif dataset.in_ch == 3:
+                    if i == 0:
+                        title = "current"
+                    elif i == 1:
+                        title = "pad distance"
+                    elif i == 2:
+                        title = "resistance total"
+                elif dataset.in_ch == 25:
+                    if i == 0:
+                        title = "current"
+                    elif i == 1:
+                        title = "pad distance"
+                    else:
+                        res_index = i - 2
+                        if res_index < len(file_group['resistances']):
+                            res_file = file_group['resistances'][res_index]
+                            title = parse_resistance_title(res_file)
+                        else:
+                            title = f"res_{res_index}"
+                else:
+                    title = f"channel {i}"
+                ax.set_title(title,fontsize=fontsize)
+                if colorbar : fig.colorbar(im, ax=ax)
+            else:
+                # 마지막 플롯에 target(ir_drop) 이미지 그리기
+                if None in [vmin, vmax]:
+                    im = ax.imshow(ir_drop, cmap=cmap, vmin=ir_drop.min(), vmax=ir_drop.max())
+                else:
+                    im = ax.imshow(ir_drop, cmap=cmap, vmin=vmin, vmax=vmax)
+                ax.set_title('IR Drop (Target)',fontsize=fontsize)
+                if colorbar : fig.colorbar(im, ax=ax)
+        else:
+            # 사용하지 않는 subplot은 숨김
+            ax.set_visible(False)
+            
+    plt.tight_layout()
+    plt.show()
+# =============================================================================
+# 사용 예시 (in_ch==3인 경우)
+# (주의: get_dataset 함수와 IRDropDataset5nm 클래스가 미리 정의되어 있어야 합니다.)
+# =============================================================================
+# 예시: in_ch가 3일 때 (채널 구성: current, pad distance, resistance total)
+# dataset = get_dataset('cus', split='val', use_raw=False, pdn_zeros=True, in_ch=3, img_size=256, types='1um')
+# # 만약 get_dataset()가 DatasetWrapper 같은 객체를 리턴한다면 .dataset 속성으로 실제 Dataset에 접근할 수 있음.
+# visualize_raw_input(dataset.dataset, idx=0, cmap='jet', vmin=None, vmax=1)
+
+# =============================================================================
+# 사용 예시 (in_ch==25인 경우)
+# dataset = get_dataset('cus', split='val', use_raw=False, pdn_zeros=True, in_ch=25, img_size=256, types='100nm')
+# visualize_raw_input(dataset.dataset, idx=0, cmap='jet', vmin=None, vmax=1)
