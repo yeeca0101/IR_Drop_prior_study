@@ -11,17 +11,7 @@ import torch.nn.functional as F
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-
-'''
-    v2 dataset :
-    IR Drop
-        "mean": 0.001601,
-        "std": 0.002327,
-        "min": 0.0,
-        "max": 0.025038
-'''
-IR_DROP_MEAN = 0.001601 
-IR_DROP_STD = 0.002327
+from config import IRDropConfig as C
 
 class IRDropDataset5nm(Dataset):
     def __init__(self, root_path, selected_folders,
@@ -139,7 +129,6 @@ class IRDropDataset5nm(Dataset):
         file_group = self.data_files[idx]
         current = self._norm(np.load(file_group['current']))
         ir_drop = np.load(file_group['ir_drop'])
-        ir_drop = self._zscore_norm(ir_drop) if not self.use_raw else ir_drop
         if ir_drop.ndim == 2:
             ir_drop = np.expand_dims(ir_drop, axis=-1)
 
@@ -202,13 +191,13 @@ class IRDropDataset5nm(Dataset):
         input_data = np.stack([current, pad_distance] + resistance_maps, axis=-1)
         
         ir_drop = np.load(file_group['ir_drop'])
-        ir_drop = self._zscore_norm(ir_drop) if not self.use_raw else ir_drop
         if ir_drop.ndim == 2:
             ir_drop = np.expand_dims(ir_drop, axis=-1)
         return input_data, ir_drop
 
     def __getitem__(self, idx):
         input_data, ir_drop = self.load_data_fn(idx)
+        ir_drop = self._min_max_norm(ir_drop) if not self.use_raw else ir_drop
         if self.train:
             transformed = self.transform(image=input_data, mask=ir_drop)
         else:
@@ -218,23 +207,44 @@ class IRDropDataset5nm(Dataset):
         target_tensor = target_tensor.permute(2, 0, 1)
         return input_tensor.float(), target_tensor.float()
 
-    def getitem_ori(self, idx):
-        return self.load_data_fn(idx)
+    def getitem_ir_ori(self, idx):
+        input_data, ir_drop = self.load_data_fn(idx)
+        # ir_drop not normalized
+        if self.train:
+            transformed = self.transform(image=input_data, mask=ir_drop)
+        else:
+            transformed = self.val_transform(image=input_data, mask=ir_drop)
+        input_tensor = transformed['image']
+        target_tensor = transformed['mask']
+        target_tensor = target_tensor.permute(2, 0, 1)
+        return input_tensor.float(), target_tensor.float()
     
     def __len__(self):
         return len(self.data_files)
 
     def _norm(self, x):
         return x / x.max() if x.max() > 0 else x
+    def _global_max_norm(self,x):
+        return x / C.max
 
     def _min_max_norm(self, x):
         return (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x
-
+    # def _min_max_norm(self,x):
+    #     # return (x) / (0.025038) # 1um
+    #     return (x) / 0.05313 # 200nm
     def _zscore_norm(self,x): # for ir drop
-        return (x - IR_DROP_MEAN) / IR_DROP_STD
+        return (x - C.mean) / C.std
+
+    def _2step_norm(self,x):
+        return (self._zscore_norm(x)-C.max) / (C.max-C.min)
 
     def _combine_3ch_data(self, current, pad_distance, resistance_total):
         return np.stack([current, pad_distance, resistance_total], axis=-1)
+
+class IRDropDataset5nmINN(IRDropDataset5nm):
+    
+    def __getitem__(self, idx):
+        return self.getitem_ir_ori(idx)
 
 
 class IRDropInferenceAutoencoderDataset5nm(IRDropDataset5nm):
@@ -253,9 +263,10 @@ class IRDropInferenceAutoencoderDataset5nm(IRDropDataset5nm):
       - 'hr_ori_shape' : 210nm ir_drop의 원본 해상도 (H, W)
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, root_path = None, *args, **kwargs):
         # 인퍼런스이므로 train=False로 강제
         # kwargs['train'] = False  
+        if root_path is not None : kwargs['root_path'] = root_path  
         super().__init__(*args, **kwargs)
         self.val_transform = A.Compose([
             A.Resize(self.target_size, self.target_size, interpolation=cv2.INTER_NEAREST),
@@ -427,15 +438,17 @@ if __name__ =='__main__':
             else:
                 print(f'{key} : ', value)
 
-    def test_new_data_error_2():
-        root_path = "/data/pdn_3rd_4types"
-        selected_folders = ['100nm_numpy']
+    def test_new_data_error_2(per= '1um'):
+        root_path = "/data"
+        # selected_folders = [f'pdn_data_4th/{per}_numpy', f'pdn_data_3rd_4types/{per}_numpy']
+        selected_folders = [f'pdn_4th_4types/{per}_numpy',f'pdn_3rd_4types/{per}_numpy']
         post_fix = ""
 
         dataset = IRDropDataset5nm(root_path=root_path,
                                     selected_folders=selected_folders,
                                     post_fix_path=post_fix,
                                     train=False,
+                                    use_raw=True,
                                     in_ch=25)
         error_count = 0
         error_indices = []
@@ -453,4 +466,7 @@ if __name__ =='__main__':
         print('error_indices : ', error_indices)
 
     # 원하는 테스트 함수를 호출하여 실행합니다.
-    test_new_data_error_2()
+    test_new_data_error_2('1um')
+    test_new_data_error_2('500m')
+    test_new_data_error_2('200m')
+    test_new_data_error_2('100nm')

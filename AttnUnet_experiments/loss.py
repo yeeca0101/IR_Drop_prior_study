@@ -153,6 +153,8 @@ class LossSelect(nn.Module):
             loss_fn = FSIMLoss()
         elif self.loss_type == 'dice':
             loss_fn = IRDiceLoss(self.dice_q)
+        elif self.loss_type == 'huber':
+            loss_fn = nn.HuberLoss()
         elif self.loss_type == 'aice':
             loss_fn = AvgQIRDiceLoss()
         elif self.loss_type == 'pice':
@@ -236,6 +238,12 @@ class LossSelect(nn.Module):
                 'loss_3':[1,'mae'],
             }
             loss_fn = self.combined_loss 
+        elif self.loss_type == 'ssim_huber':
+            self.lambda_fn_dict={
+                'loss_2':[1,'ssim'],
+                'loss_3':[1,'huber'],
+            }
+            loss_fn = self.combined_loss 
         elif self.loss_type == 'ssim_default':
             self.lambda_fn_dict={
                 'loss_2':[1,'ssim'],
@@ -244,8 +252,8 @@ class LossSelect(nn.Module):
             loss_fn = self.combined_loss  
         elif self.loss_type == 'ssim_mse':
             self.lambda_fn_dict={
-                'loss_2':[0.5,'ssim'],
-                'loss_3':[0.5,'mse'],
+                'loss_2':[1.,'ssim'],
+                'loss_3':[1.,'mse'],
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ms_ssim_mse':
@@ -263,7 +271,7 @@ class LossSelect(nn.Module):
         elif self.loss_type == 'ms_ssim_dice':
             self.lambda_fn_dict={
                 'loss_2':[1,'ms_ssim'],
-                'loss_3':[1,'dice'],
+                'loss_3':[0.1,'dice'],
             }
             loss_fn = self.combined_loss  
         elif self.loss_type == 'ssim_dice_mae':

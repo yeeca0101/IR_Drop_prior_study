@@ -29,7 +29,7 @@ def get_dataset(dt,split='train',get_case_name=True,pdn_zeros=False,in_ch=12,img
         print(f'asap7_train_val : {split}')
     elif dt == 'cus':
         kwargs = {'root_path':root_path} if root_path else {}  
-        train_dt,val_dt = build_dataset_5m(img_size=img_size,train=True,in_ch=in_ch,use_raw=use_raw,selected_folders=[f'{types}_numpy'],**kwargs)
+        train_dt,val_dt = build_dataset_5m(img_size=img_size,train=True,in_ch=in_ch,use_raw=use_raw,unit=types,**kwargs)
         if split =='train':
             return train_dt
         else: return val_dt

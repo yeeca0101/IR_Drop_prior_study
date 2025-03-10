@@ -79,7 +79,8 @@ class IRDropPrediction(LightningModule):
         elif args.checkpoint_path:
             self.model = init_weights_chkpt(self.model,args.checkpoint_path)
         else:
-            init_weights(self.model)
+            if 'attn' in args.arch: 
+                init_weights(self.model)
 
         self.criterion = LossSelect(loss_type=args.loss,
                                     use_cache=True if args.loss == 'cache' else False,
@@ -213,13 +214,12 @@ class IRDropPrediction(LightningModule):
                                                                                     use_raw=args.use_raw
                                                                                    )
             elif args.dataset.lower() == 'cus':
-                selected_folders = [f'{args.dbu_per_px}_numpy']
-                print('selected folders : ',selected_folders)
+                print('selected folders : ',args.dbu_per_px)
                 self.train_dataset, self.val_dataset = build_dataset_5m(img_size=args.img_size,
                                                                         use_raw=args.use_raw,
                                                                         in_ch=args.in_ch,
                                                                         train=True,
-                                                                        selected_folders=selected_folders
+                                                                        unit=args.dbu_per_px
                                                                                    )
             else:
                 raise NameError('check dataset name')

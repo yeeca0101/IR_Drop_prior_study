@@ -1,8 +1,9 @@
 __pycache__
+*checkpoint*
 */checkpoint
 */checkpoints
 data
-logs
+*logs*
 results
 csv
 

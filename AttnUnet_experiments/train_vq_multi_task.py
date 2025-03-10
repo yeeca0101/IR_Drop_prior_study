@@ -1,7 +1,7 @@
 '''
     author : ymin98@sogang.ac.kr
     CVQ-Attn-Unet v6_1 > version
-
+    multi head output과 hr 모델 실험 코드
 '''
 
 import argparse

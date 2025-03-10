@@ -209,7 +209,8 @@ def get_num_embeddings(state_dict):
             return value.shape[0]
     return None
 
-def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',fontsize=14,in_ch=3,colorbar=False,vmin=0,vmax=1):
+def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices, plot_inputs=[], device='cuda:0', measure=['f1'],cmap='jet',
+                                      fontsize=14,colorbar=False,vmin=0,vmax=1, move_raw=False, colorbar_target=False):
     # Setup plot grid dimensions
     rows = len(checkpoint_paths) + 1
     cols = len(sample_indices)
@@ -226,14 +227,16 @@ def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices
     for col_idx, idx in enumerate(sample_indices):
         sample = base_dataset.__getitem__(idx)
         inp, target = sample[0], sample[1]
+        if move_raw: target = target * 0.25038
 
         # Plot Ground Truth (GT)
         if vmin == 'auto':
-            axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=target.squeeze().cpu().numpy().min(),vmax=target.squeeze().cpu().numpy().max())
+            im = axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=target.squeeze().cpu().numpy().min(),vmax=target.squeeze().cpu().numpy().max())
         else:
-            axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=vmin,vmax=vmax)
+            im = axes[0, col_idx].imshow(target.squeeze().cpu().numpy(), cmap=cmap,vmin=vmin,vmax=vmax)
         axes[0, col_idx].set_title(f"GT (Index {idx})",fontsize=fontsize+5)
         axes[0, col_idx].axis('off')
+        if colorbar_target : fig.colorbar(im,ax=axes[0, col_idx])
 
         if plot_inputs:
             for i, channel_idx in enumerate(plot_inputs):
@@ -345,6 +348,7 @@ def plot_predictions_from_checkpoints(checkpoint_paths, datasets, sample_indices
                 raise ValueError(f'{checkpoint_path} not match {inp_batch.shape} or {channels}')
             
             # Plot predictions
+            if move_raw : pred = pred * 0.025038
             if vmin == 'auto':
                 im = axes[current_row, col_idx].imshow(pred.squeeze().numpy(), cmap=cmap,vmin=pred.squeeze().numpy().min(),vmax=pred.squeeze().numpy().max())
             else:
@@ -600,7 +604,6 @@ class InferencePipeline1umTo210nm:
             metrics_lr = {}
             metrics_hr = {}
            
-
         # 4. 시각화
         # Tensor를 numpy array로 변환 (채널 차원 제거)
         lr_target_np = lr_target.squeeze(0).numpy()
