@@ -1,3 +1,7 @@
+'''
+    2025.03.18 data 6th version
+'''
+
 from dataclasses import dataclass
 import cv2
 
@@ -8,51 +12,44 @@ class IRDropConfig:
     min: float
     max: float
 
-
 @dataclass(frozen=True)
 class Config:
-    # 네트워크 입력 해상도
     resolution: tuple = (256, 256)
-    # cv2.resize 보간법 (예: cv2.INTER_LANCZOS4)
-    interpolation: int = cv2.INTER_NEAREST
-    # IR Drop 관련 통계정보
+    interpolation: int = cv2.INTER_AREA
     ir_drop: IRDropConfig = None
 
 
-# 200nm 기준값 (원본)
 ir_drop_200nm = IRDropConfig(
-    mean=0.00140431,
-    std=0.00247082,
+    mean=2.5323e-03,
+    std=2.0482e-03,
     min=0.0,
-    max=0.0531378999999999
+    max=4.7579e-02
 )
 
-# 100nm 값 (200nm의 0.5배)
 ir_drop_100nm = IRDropConfig(
-    mean=-1,
-    std=-1,
+    mean=1.8642e-03,
+    std=2.2837e-03,
     min=0.0,
-    max=0.0904707999999998
+    max=4.7579e-02
 )
 
-# 500nm 값 (200nm의 2.5배)
 ir_drop_500nm = IRDropConfig(
-    mean=-1,
-    std=-1,
+    mean=2.7501e-03,
+    std=2.1259e-03,
     min=0.0,
-    max=0.0353812279999999
+    max=4.7579e-02
 )
 
-# 1um (1000nm) 값 (200nm의 5배)
 ir_drop_1um = IRDropConfig(
-    mean=-1,
-    std=-1,
+    # mean=4.8804e-02,
+    # std=4.6042e-02,
+    mean=2.9581e-03,
+    std=2.3594e-03,
     min=0.0,
-    max=0.0250380959999999
+    max=4.7579e-02
 )
 
 
-# 사용 예시
 def get_config(process_node):
     """
     공정 노드에 따른 Config 객체를 반환합니다.

@@ -106,7 +106,7 @@ DBU_PER_PIXEL_DICT = {
 
 if __name__ == '__main__':
     # Main Execution
-    base_path = "/data/pdn_4th_4types"
+    base_path = "/data/pdn_data_6th"
     resolution_folders = ["1um", "200nm", "500nm", "100nm"]
     # resolution_folders = ["1um",'210nm']  # or "210nm"
 

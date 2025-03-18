@@ -12,8 +12,8 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning import Callback
 from pytorch_lightning.strategies import DDPStrategy
 
-from unets import AttU_Net,init_weights  # UNet 모델을 import (별도로 구현 필요)
 from models import *
+from models.parts.vqvae import init_weights
 from metric import IRDropMetrics  # 이전에 구현한 메트릭 클래스
 from ir_dataset import IRDropDataset,build_dataset_iccad,build_dataset,build_dataset_began_asap7
 from loss import *
@@ -56,20 +56,20 @@ parser.add_argument('--monitor', type=bool, default='f1', help='monitor metric')
 args = parser.parse_args()
 
 
-def build_model(arch):
-    if arch == 'attn_12ch':
-        model = AttU_Net(img_ch=12)
-    elif arch == 'attn_base':
-        model = AttnUnetBase()
-    elif arch == 'attnv2':
-        model = AttnUnetV2(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
-    elif arch == 'attnv3':
-        model = AttnUnetV3(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
-    elif arch == 'attnv4':
-        model = AttnUnetV4(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch, num_head=2 if args.in_ch==2 else 4)    
-    else:
-        raise NameError(f'arch type error : {arch}')
-    return model
+# def build_model(arch):
+#     if arch == 'attn_12ch':
+#         model = AttU_Net(img_ch=12)
+#     elif arch == 'attn_base':
+#         model = AttnUnetBase()
+#     elif arch == 'attnv2':
+#         model = AttnUnetV2(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
+#     elif arch == 'attnv3':
+#         model = AttnUnetV3(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch)
+#     elif arch == 'attnv4':
+#         model = AttnUnetV4(dropout_name=args.dropout,dropout_p=0.05 if args.finetune else 0.1, in_ch=args.in_ch, num_head=2 if args.in_ch==2 else 4)    
+#     else:
+#         raise NameError(f'arch type error : {arch}')
+#     return model
 
 
 class IRDropPrediction(LightningModule):

@@ -7,6 +7,7 @@ import os
 import re
 import torch
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 
 from .utils import find_pth_files, min_max_norm, calculate_metrics, to_numpy, DiceLoss
@@ -16,64 +17,125 @@ from models import *
 def predict_and_visualize(dataset, model, checkpoint_path,
                           index, cols=4, colorbar=False,
                           norm_out=False, device='cuda:0',
-                          casename=False, cmap='inferno',use_raw=False,sr=False):
-
+                          casename=False, cmap='inferno',
+                          use_raw=False,sr=False,with_out_inp=False,
+                          plot_mask=False,top_region=0.9,mask_opt='max',plot_scatter=False,out_key = 'x_recon'):
+    '''
+        args:
+            mask_opt : 'max' or 'quantile'
+    '''
+    model.to(device)
     checkpoint_path = find_pth_files(checkpoint_path)
+    model.load_state_dict(torch.load(checkpoint_path,map_location=device)['net'])
     model.eval()
-    model.load_state_dict(torch.load(checkpoint_path)['net'])
 
     sample = dataset.__getitem__(index)
-    inp, target = sample[0], sample[1]
+    inp, target = sample[0], sample[1].contiguous()
+    print('target max : ',target.max())
+    inp_batch = inp.unsqueeze(0).to(device)
     if casename:
         print(sample[2])
-
-    inp_batch = inp.unsqueeze(0).to(device)
-    model.to(device)
 
     with torch.no_grad():
         pred = model(inp_batch) if not sr else model(inp_batch, target.shape[-2:])
     if len(pred) >= 1: 
-        pred = pred['x_recon']
+        pred = pred[out_key]
+    
     pred = pred.detach().cpu() 
+    print(pred.shape)
 
     if norm_out:
         pred = min_max_norm(pred)
-        if use_raw:
-            target = min_max_norm(target)
-            
-    mae_map = torch.abs(pred - target)
-    print('mae : ', torch.mean(mae_map))
+
+    target_min = None
+    target_max = None
+    if use_raw :
+        target_min = target.min()
+        target_max = target.max()
+        _, t_h, t_w = target.shape
+        pred = (target_max-target_min)*pred + target_min
+        # else: pred *=0.01
+        print(t_h,t_w)
+        pred = F.interpolate(pred.unsqueeze(0), size=(1,t_h, t_w), mode='area').squeeze(0)
+    print('pred max : ',pred.max())
+
+    mae_map = torch.abs(pred - target) 
+    if use_raw:
+        print(f'mae : {torch.mean(mae_map).item()*1000:.2f} mV')
+    else:
+        print('mae : ', round(torch.mean(mae_map).item(),5))
+
     pred = pred.squeeze(0)
 
-    dice_coeff, f1 = calculate_metrics(pred, target, th=90)
-    print(f"Dice Coefficient: {dice_coeff:.3f}")
+    mae_10, f1 = calculate_metrics(pred, target, mask_opt=mask_opt)
+    if use_raw : mae_10 *=1000
     print(f"F1 Score: {f1:.3f}")
-
+    print(f'mae 10 : {mae_10:.3f}' + ' mV' if use_raw else '')
     if inp.dim() == 2:  # 단일 채널, 
         all_images = [inp]
     elif inp.dim() == 3:  # 다중 채널, 
         all_images = [inp[i] for i in range(inp.shape[0])]
 
-    all_images += [target, pred, mae_map]
+    if with_out_inp:
+        all_images = [target, pred, mae_map]
+        titles = ['Target', 'Prediction', 'MAE Map']
+    else:
+        all_images += [target, pred, mae_map]
+        titles = [f'Input {i + 1}' for i in range(len(all_images) - 3)] + ['Target', 'Prediction', 'MAE Map']
 
+    if plot_mask:
+        if mask_opt == 'max':
+            threshold = target.max() * top_region
+            target_mask = (target >= threshold).float()
+            pred_mask = (pred >= threshold).float()
+        elif mask_opt == 'quantile':
+            pred_threshold = torch.quantile(pred.view(-1),top_region)
+            target_threshold = torch.quantile(target.view(-1),top_region)
+            pred_mask = (pred >= pred_threshold).float()
+            target_mask = (target >= target_threshold).float()
+        elif mask_opt == 'quantile_target':
+            target_threshold = torch.quantile(target.view(-1),top_region)
+            pred_mask = (pred >= target_threshold).float()
+            target_mask = (target >= target_threshold).float()
+        all_images += [target_mask, pred_mask]
+        titles += ['Target Mask', 'Prediction Mask']
+
+    if plot_scatter:
+        all_images.append((target.flatten(), pred.flatten(), target.max() * 0.9))  # threshold와 함께 tuple 저장
+        titles.append('Target vs. Pred (Scatter)')
+        
     rows = (len(all_images) + cols - 1) // cols
 
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 4))
     axes = np.array(axes).reshape(-1) if isinstance(axes, np.ndarray) else np.array([axes])
 
-    titles = [f'Input {i + 1}' for i in range(len(all_images) - 3)] + ['Target', 'Prediction', 'MAE Map']
 
     for i, (img, title) in enumerate(zip(all_images, titles)):
-        img = img.squeeze().cpu().numpy()
         ax = axes[i]
-        if use_raw:
-            im = ax.imshow(img, cmap=cmap, vmin=img.min(), vmax=img.max()) 
-        else:
-            im = ax.imshow(img, cmap=cmap, vmin=0, vmax=1) # if colorbar else ax.imshow(img, cmap=cmap)
-        ax.set_title(title)
-        # ax.axis('off')
-        if colorbar and (i > len(titles)-4):
-            fig.colorbar(im, ax=ax)
+        if isinstance(img, tuple):  # Scatter인 경우
+            target_flat, pred_flat, threshold = img[0].cpu().numpy(), img[1].cpu().numpy(), img[2].cpu().numpy()
+            ax.scatter(target_flat, pred_flat, alpha=0.3, s=5, label='All Points')  # 모든 점
+            min_val = min(target_flat.min(), pred_flat.min())
+            max_val = max(target_flat.max(), pred_flat.max())
+            ax.plot([min_val, max_val], [min_val, max_val], 'r--', label='y = x')
+            mask_high = target_flat >= threshold
+            ax.scatter(target_flat[mask_high],pred_flat[mask_high], color='red', s=5, marker='s', label='Target ≥ 90% max')
+
+            ax.set_xlabel('Target IR Drop')
+            ax.set_ylabel('Prediction')
+            ax.set_title('Scatter Plot: Target vs. Prediction')
+            ax.legend()
+        else:  # 일반 이미지인 경우
+            img = img.squeeze().cpu().numpy()
+            if 'Mask' in title:
+                im = ax.imshow(img, vmin=img.min(), vmax=img.max())
+            elif use_raw and ('Input' not in title):
+                im = ax.imshow(img, cmap=cmap, vmin=target_min, vmax=target_max)
+            else:
+                im = ax.imshow(img, cmap=cmap, vmin=0, vmax=1)
+            ax.set_title(title)
+            if 'Input' not in title:
+                fig.colorbar(im, ax=ax)
 
     # 남은 서브플롯 제거
     for i in range(len(all_images), len(axes)):

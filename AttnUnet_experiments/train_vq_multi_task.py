@@ -46,6 +46,7 @@ parser.add_argument('--optim', type=str, default='adam', help='opitmizer')
 parser.add_argument('--dropout', type=str, default='dropblock', help='for attnV2')
 parser.add_argument('--arch', type=str, default='attn_12ch', help='sup model : [attn_12ch, attn_base_12ch, attnv2, vqvae]') # vqvae 추가
 parser.add_argument('--loss', type=str, default='default', help='sup loss : [default, comb, default_edge,edge,ssim,dice]')
+parser.add_argument('--loss_aux', type=str, default='default', help='sup loss : [default, comb, default_edge,edge,ssim,dice]')
 parser.add_argument('--weight_decay', type=float, default=5e-4, help='prev : 5e4')
 parser.add_argument('--dice_q', type=float, default=0.9, help='top %')
 parser.add_argument('--pdn_density_dropout', type=float, default=0.0, help='0.~1. 0: False, 1 : always')
@@ -59,110 +60,77 @@ parser.add_argument('--img_size', type=int, default=512, help='input img_size')
 parser.add_argument('--mixed_precision', type=bool, default=False, help='mixed_precision')
 parser.add_argument('--monitor', type=str, default='f1', help='monitor metric')
 parser.add_argument('--use_raw', type=bool, default=False, help='not normalized ir drop map.')
-parser.add_argument('--vqvae_size', type=str, default='default', help='vqvae model size : [default, small, large]') # vqvae_size 추가
 parser.add_argument('--post_min_max', type=bool, default=False, help='if True, min_max_norm(model(x)) ') 
 parser.add_argument('--use_ema', action='store_true', help='vq ema')
-parser.add_argument('--dbu_per_px', type=str, default='1um', help='210nm or 1um')
+parser.add_argument('--dbu_per_px', type=str, default='1um', help='')
 parser.add_argument('--checkpoint_path', type=str, default='', help='')
 parser.add_argument('--num_embeddings', type=int, default=512, help='number of codebooks vector')
 parser.add_argument('--auto_encoder', action='store_true', help='auto encoder mode ')
+parser.add_argument('--metric_type', type=str, default='max', help='max or quantile')
 
 args = parser.parse_args()
 
 
 
 class IRDropPrediction(LightningModule):
-    def __init__(self, lr):
+    def __init__(self, lr,):
+                #  epoch=args.epoch,arch=args.arch,finetune=args.finetune,metric_type=args.metric_type,in_ch=args.in_ch,pdn_zeros=args.pdn_zeros,loss=args.loss,num_ebedd=args.num_embeddings):
         super().__init__()
         self.lr = lr
         self.num_workers = 4 if args.dataset.lower() == 'began' else 0
         self.num_workers=4
-        self.use_ema = args.use_ema
+
 
         self.train_auto_encoder = True if args.auto_encoder else False
 
-        self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)
+        self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,args.use_ema,num_embeddings=args.num_embeddings)
         if args.finetune:
             self.model = init_weights_chkpt(self.model,args.save_folder)
         elif args.checkpoint_path:
             self.model = init_weights_chkpt(self.model,args.checkpoint_path)
-        else:
-            init_weights(self.model)
 
-        if not self.train_auto_encoder:
-            self.criterion = MultiTaskLoss( loss_type=args.loss,
-                                        use_cache=True if args.loss == 'cache' else False,
-                                        dice_q=args.dice_q,
-                                        loss_with_logit=args.loss_with_logit,
-                                        post_min_max=args.post_min_max
+
+        self.criterion = MultiTaskLoss(loss_types=(args.loss,args.loss_aux),
+                                    dice_q=args.dice_q,
                                     )
-        else:
-            self.criterion = LossSelect( loss_type=args.loss,
-                                        use_cache=True if args.loss == 'cache' else False,
-                                        dice_q=args.dice_q,
-                                        loss_with_logit=args.loss_with_logit,
-                                        post_min_max=args.post_min_max
-                                    )
-            
+
         print(self.criterion.loss_type)
-        print('use ema : ', self.use_ema)
-        self.metrics = IRDropMetrics(loss_with_logit=args.loss_with_logit,post_min_max=args.post_min_max)
-        # self.save_hyperparameters()
+        self.metrics = IRDropMetrics(post_min_max=args.post_min_max)
+        self.save_hyperparameters(args)
 
-    def forward(self, x,target_hw):
-        return self.model(x,target_hw)
+    def forward(self, x):
+        return self.model(x)
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self(inputs,targets.shape[-2:])
-        if not self.train_auto_encoder:
-            dictionary_loss = outputs['dictionary_loss']
-        else: 
-            dictionary_loss = 0
-            outputs = outputs['x_recon']
+        outputs = self(inputs)
+        dictionary_loss = outputs.get('dictionary_loss',0)
 
         recon_loss = self.criterion(outputs, targets)
         loss = recon_loss + dictionary_loss
 
-        metrics = self.metrics.compute_metrics(outputs , targets)
+        metrics = self.metrics.compute_metrics(outputs['x_recon'] , targets)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('train_mae', metrics['mae'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        if self.train_auto_encoder:
-            self.log('val_ssim', metrics['ssim'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        else:
-            self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self(inputs,targets.shape[-2:])
-        if not self.train_auto_encoder:
-            dictionary_loss = outputs['dictionary_loss']
-        else: 
-            dictionary_loss = 0
-            outputs = outputs['x_recon']
+        outputs = self(inputs)
+        dictionary_loss = outputs.get('dictionary_loss',0)
 
         recon_loss = self.criterion(outputs, targets)
-
         loss = recon_loss + dictionary_loss
 
-        metrics = self.metrics.compute_metrics(outputs, targets)
+        metrics = self.metrics.compute_metrics(outputs['x_recon'], targets)
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        if self.train_auto_encoder:
-            self.log('val_ssim', metrics['ssim'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        else:
-            self.log('train_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('val_f1', metrics['f1'], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('val_mae', metrics['mae'], on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
-        # 2025.1.23 mod
-        # quantizer_params = list(self.model.vq.parameters()) if not self.use_ema else []
-        # network_params = [p for n, p in self.model.named_parameters() if 'vq' not in n]
-
         network_params = self.model.parameters()
-
-        # Configure network optimizer
         if args.optim == 'adam':
             optimizer_network = optim.Adam(network_params, lr=args.lr, weight_decay=args.weight_decay)
         elif args.optim == 'sgd':
@@ -180,7 +148,6 @@ class IRDropPrediction(LightningModule):
         else:
             raise ValueError(f'Scheduler {args.scheduler} is not supported')
 
-       
         return {
             "optimizer": optimizer_network,
             "lr_scheduler": {
@@ -215,26 +182,24 @@ class IRDropPrediction(LightningModule):
                                                                                     use_raw=args.use_raw
                                                                                    )
             elif args.dataset.lower() == 'cus':
-                sup_folders = ['210nm_numpy','1um_numpy']
-                selected_folders = [sup_folders[0]] if '210nm' in args.dbu_per_px else  [sup_folders[1]] if '1um' in args.dbu_per_px else sup_folders
-                print('selected folders : ',selected_folders)
+                print('selected folders : ',args.dbu_per_px)
                 self.train_dataset, self.val_dataset = build_dataset_5m(img_size=args.img_size,
                                                                         use_raw=args.use_raw,
                                                                         in_ch=args.in_ch,
                                                                         train=True,
-                                                                        selected_folders=selected_folders,
-                                                                        train_auto_encoder = self.train_auto_encoder
+                                                                        unit=args.dbu_per_px
                                                                                    )
             else:
                 raise NameError('check dataset name')
         
         def test_dt(dt):
             inp = dt.__getitem__(0)[0]
+            print('inp shape : ',inp.shape)
             assert args.in_ch == inp.size(0), f"{args.in_ch} is not matching {inp.size(0)}"
         test_dt(self.train_dataset)
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=self.num_workers,persistent_workers=False)
+        return DataLoader(self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=self.num_workers)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=self.num_workers)
@@ -257,16 +222,31 @@ def init_weights_chkpt(model, save_folder):
 
     return model
 
+def get_run_paths():
+    # 기본 베이스 경로 (원하는 기본 디렉토리로 수정 가능)
+    base_log_dir = args.log_dir
+    base_ckpt_dir = args.save_folder
+
+    # finetune 여부에 따라 하위 폴더 구성
+    if args.finetune:
+        subfolder = os.path.join(args.checkpoint_path, "finetune",args.loss)
+    else:
+        subfolder = os.path.join(str(args.in_ch), args.arch, args.dataset, args.loss)
+    
+    if args.post_fix:
+        subfolder = os.path.join(subfolder, args.post_fix)
+
+    # 최종 경로 생성
+    log_dir = os.path.join(base_log_dir, subfolder)
+    checkpoint_dir = os.path.join(base_ckpt_dir, subfolder)
+    return log_dir, checkpoint_dir
+
 class CustomCheckpoint(Callback):
-    def __init__(self, checkpoint_dir, repeat_idx, metric_name='val_mae', mode='min',post_fix=''):
+    def __init__(self, checkpoint_dir,  metric_name='val_mae', mode='min'):
         super().__init__()
-        checkpoint_dir = os.path.join(checkpoint_dir,args.vqvae_size)
-        self.checkpoint_dir = checkpoint_dir if args.post_fix == '' else f'{checkpoint_dir}/{args.post_fix}'
-        if args.finetune:
-            self.checkpoint_dir = os.path.join(self.checkpoint_dir,'finetune',args.loss,post_fix)
+        self.checkpoint_dir = checkpoint_dir
         self.best_metric = float('inf') if mode == 'min' else float('-inf')
         self.best_model_file_name = ""
-        self.repeat_idx = repeat_idx
         self.metric_name = metric_name
         self.mode = mode
 
@@ -283,46 +263,27 @@ class CustomCheckpoint(Callback):
                         'epoch': trainer.current_epoch,
                         'mae': trainer.callback_metrics.get('val_mae', None),
                         'f1': trainer.callback_metrics.get('val_f1', None),
-                        'ssim': trainer.callback_metrics.get('val_ssim',None)
                     }
                     if self.best_model_file_name:
                         old_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
-                        os.remove(old_path)
-                    use_ema_str = 'use_ema' if args.use_ema else 'non_ema'
-                    self.best_model_file_name = f'{args.arch}_embd{args.num_embeddings}_{use_ema_str}_{trainer.current_epoch}_{val_metric:.4f}.pth'
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    self.best_model_file_name = f'{args.arch}_embd{args.num_embeddings}_{args.metric_type}_{trainer.current_epoch}_{val_metric:.4f}.pth'
                     new_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
                     os.makedirs(self.checkpoint_dir, exist_ok=True)
                     torch.save(state, new_path)
                     print(f'Saved new best model to: {new_path}')
 
-def make_logdir():
-    if args.finetune:           
-        pre_train_loss = args.save_folder.split('/')[-1]
-        logdir = os.path.join(args.log_dir,f'{args.arch}/{args.dataset}/{pre_train_loss}')
-        logdir = os.path.join(logdir,f'finetune/{args.loss}')
-    else:
-        logdir = os.path.join(args.log_dir,f'{args.arch}/{args.vqvae_size}/{args.dataset}/{args.loss}')
-        if args.arch == 'attnv2':   logdir = os.path.join(logdir,args.dropout)
-    
-    if not args.loss_with_logit:logdir = os.path.join(logdir,'sigmoid')
-    logdir = f'{logdir}' if args.post_fix =='' else f'{logdir}/{args.post_fix}'
-
-    return logdir
-
 def main(i):
     model = IRDropPrediction(lr=args.lr)
-    logdir = make_logdir()
+    logdir, checkpoint_dir = get_run_paths()
     logger = TensorBoardLogger(save_dir=logdir, name=f'')
-    
     monitor_metric = f'val_{args.monitor}'  
     print('monitor : ',monitor_metric)
-
     checkpoint_callback = CustomCheckpoint(
-        checkpoint_dir=args.save_folder,
-        repeat_idx=i,
-        metric_name=monitor_metric, 
-        mode='min' if monitor_metric in 'val_mae' else 'max' ,
-        post_fix=args.post_fix
+        checkpoint_dir=checkpoint_dir,
+        metric_name=monitor_metric,
+        mode='min' if monitor_metric == 'val_mae' else 'max'
     )
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
 

@@ -31,7 +31,7 @@ class IRDropDataset(Dataset):
         self.selected_folders = selected_folders
         self.target_layers = target_layers
         self.csv_path = csv_path
-        self.target_size = img_size
+        self.img_size = img_size
         self.post_fix = post_fix_path
         self.preload = preload  # 메모리 캐싱 여부
         self.cached_data = None  # 캐시된 데이터 저장용
@@ -45,22 +45,23 @@ class IRDropDataset(Dataset):
         if self.is_asap7 : self.use_irreg =True
 
         self.transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
-            A.OneOf([
-                A.HorizontalFlip(p=1),
-                A.VerticalFlip(p=1),
-                A.Rotate(limit=(90, 90), p=1),
-                A.Rotate(limit=(180, 180), p=1),
-                A.Rotate(limit=(270, 270), p=1),
-                A.NoOp(p=1)  # 아무 변환도 적용하지 않을 확률
-            ], p=1),   # OneOf 내의 변환 중 하나를 선택
-            ToTensorV2()
-        ])
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA),
+                A.OneOf([
+                A.Compose([
+                    A.HorizontalFlip(p=0.2),
+                    A.VerticalFlip(p=0.2),
+                    A.Rotate(limit=(90, 90), p=0.2),
+                    A.Rotate(limit=(180, 180), p=0.2),
+                    A.Rotate(limit=(270, 270), p=0.2)]),
+                A.NoOp(p=1),
+                ],p=1),
+                ToTensorV2()
+        ],is_check_shapes=False)
 
         self.val_transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA),
             ToTensorV2()
-        ])
+        ],is_check_shapes=False)
 
         if csv_path and os.path.exists(csv_path):
             # Load file paths from the CSV file
@@ -213,7 +214,6 @@ class IRDropDataset(Dataset):
         
         resistance_stack = np.stack(resistance_stack, axis=-1)
         input_data = np.stack([current, eff_dist, pdn_density], axis=-1)
-        print(resistance_stack.shape,input_data.shape)
 
         input_data = np.concatenate([input_data, resistance_stack], axis=-1)
         
@@ -241,6 +241,17 @@ class IRDropDataset(Dataset):
         input_data = np.stack([current, resistance_total], axis=-1)
         return input_data, ir_drop
     
+    def _load_data_from_disk_3ch(self, idx):
+        input_data_2ch, ir_drop = self._load_data_from_disk_2ch(idx)
+        file_group = self.data_files[idx]
+        pad_distance = self._norm(np.load(file_group['pad_distance']))
+        
+        current = input_data_2ch[..., 0]      # current 채널
+        resistance_total = input_data_2ch[..., 1]  # resistance 합산 채널
+
+        input_data_3ch = self._combine_3ch_data(current, pad_distance, resistance_total)
+        return input_data_3ch, ir_drop
+    
     def __len__(self):
         return len(self.data_files)
 
@@ -248,24 +259,18 @@ class IRDropDataset(Dataset):
         return x / x.max()
 
     def _min_max_norm(self,x):
-        return (x-x.min())/(x.max()-x.min())
+        return x / x.max()
+        # return (x-x.min())/(x.max()-x.min())
     
     def __getitem__(self, idx):
-        if self.preload:
-            # 미리 로드된 데이터를 반환
-            input_data, ir_drop = self.cached_data[idx]
-        else:
-            # 디스크에서 데이터를 로드
-            input_data, ir_drop = self._load_data_from_disk(idx) if self.in_ch != 2 else self._load_data_from_disk_2ch(idx)
+        input_data, ir_drop = self._load_data_from_disk(idx) if self.in_ch != 2 else self._load_data_from_disk_2ch(idx)
         
         # 입력 데이터 변환
         transformed = self.transform(image=input_data, mask=ir_drop) if self.train else self.val_transform(image=input_data, mask=ir_drop)
         input_tensor = transformed['image']
-        target_tensor = transformed['mask']
-        if self.in_ch==1: # current map
-            input_tensor = input_tensor[0].unsqueeze(0)
+        target_tensor = transformed['mask'] 
             
-        return input_tensor.float(), target_tensor.float()
+        return input_tensor.float(), target_tensor.unsqueeze(0).float()
 
     def _getitem_ori(self, idx):
         file_group = self.data_files[idx]
@@ -287,9 +292,8 @@ class IRDropDataset(Dataset):
 
         return input_data, ir_drop
     
-
-
-
+    def _combine_3ch_data(self, current, pad_distance, resistance_total):
+        return np.stack([current, pad_distance, resistance_total], axis=-1)
 
 
 class IRDropFineTuneDataset(Dataset):
@@ -308,7 +312,7 @@ class IRDropFineTuneDataset(Dataset):
         self.selected_folders = selected_folders
         self.target_layers = target_layers
         self.csv_path = csv_path
-        self.target_size = img_size
+        self.img_size = img_size
         self.preload = preload  # Cache data in memory
         self.cached_data = None  # Cached data storage
         self.pdn_density_p = pdn_density_p
@@ -319,18 +323,24 @@ class IRDropFineTuneDataset(Dataset):
         self.pdn_zeros = pdn_zeros
         self.use_raw = use_raw
 
-        self.transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
-            A.OneOf([
-                A.HorizontalFlip(p=1),
-                A.VerticalFlip(p=1),
-                A.Rotate(limit=(90, 90), p=1),
-                A.Rotate(limit=(180, 180), p=1),
-                A.Rotate(limit=(270, 270), p=1),
-                A.NoOp(p=1)  # No transformation
-            ], p=1) if train else A.NoOp(p=1),
+        self.resize = A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA)
+        self.train_transform = A.Compose([
+                A.OneOf([
+                A.Compose([
+                    A.HorizontalFlip(p=0.2),
+                    A.VerticalFlip(p=0.2),
+                    A.Rotate(limit=(90, 90), p=0.2),
+                    A.Rotate(limit=(180, 180), p=0.2),
+                    A.Rotate(limit=(270, 270), p=0.2)]),
+                A.NoOp(p=1),
+                ],p=1),
+                ToTensorV2()
+        ],is_check_shapes=False)
+
+        self.val_transform = A.Compose([
             ToTensorV2()
-        ])
+        ],is_check_shapes=False)
+
 
         if csv_path and os.path.exists(csv_path):
             # Load file paths from the CSV file
@@ -340,10 +350,6 @@ class IRDropFineTuneDataset(Dataset):
             self.data_files = self._find_files()
             if csv_path:
                 self._save_to_csv(self.data_files, csv_path)
-
-        if preload:
-            # Preload data into memory
-            self.cached_data = self._preload_data()
 
     def _find_files(self):
         data_files = []
@@ -434,24 +440,19 @@ class IRDropFineTuneDataset(Dataset):
         """ Helper function to load data from disk for a given index. """
         file_group = self.data_files[idx]
         
-        current = self._norm(np.load(file_group['current']))
-        if self.pdn_zeros:
-            eff_dist= np.ones_like(current)
-        else:
-            eff_dist = self._norm(np.load(file_group['eff_dist']))
+        current = np.load(file_group['current'])
+        eff_dist = np.load(file_group['eff_dist'])
         ir_drop = np.load(file_group['ir_drop'])
-        
-        ir_drop = self._min_max_norm(ir_drop) if not self.use_raw else ir_drop
-
+                                        
         if np.random.random() < self.pdn_density_p and self.train or self.pdn_zeros:
-            pdn_density = np.ones_like(current)
+            pdn_density = np.zeros_like(current)
         else:
-            pdn_density = self._norm(np.load(file_group['pdn_density']))
+            pdn_density = np.load(file_group['pdn_density'])
 
         resistance_stack = []
         for layer in self.target_layers:
             res_file = file_group['resistances'][layer][idx]
-            resistance_stack.append(self._norm(np.load(res_file)))
+            resistance_stack.append(np.load(res_file))
         
         resistance_stack = np.stack(resistance_stack, axis=-1)
         input_data = np.stack([current, eff_dist, pdn_density], axis=-1)
@@ -462,17 +463,15 @@ class IRDropFineTuneDataset(Dataset):
     def _load_data_from_disk_2ch(self, idx):
         """ Helper function to load data from disk for a given index. """
         file_group = self.data_files[idx]
-        current = self._norm(np.load(file_group['current']))
-        
+        current = np.load(file_group['current'])
         ir_drop = np.load(file_group['ir_drop'])
-        ir_drop = self._min_max_norm(ir_drop) if not self.use_raw else ir_drop
 
         resistance_stack = []
         for layer in self.target_layers:
             res_file = file_group['resistances'][layer][idx]  # idx에 맞는 resistance 데이터 가져옴
             resistance_stack.append(np.load(res_file))
         resistance_stack = np.stack(resistance_stack, axis=-1).sum(-1)
-        resistance_total = self._norm(resistance_stack)
+        resistance_total = resistance_stack
             
         input_data = np.stack([current, resistance_total], axis=-1)
         return input_data, ir_drop
@@ -486,20 +485,49 @@ class IRDropFineTuneDataset(Dataset):
     def _min_max_norm(self,x):
         return (x-x.min())/(x.max()-x.min())
 
+    def channel_wise_min_max(self,x):
+        channel_max = np.max(x, axis=(0, 1), keepdims=True)
+        channel_min = np.min(x, axis=(0, 1), keepdims=True)
+        channel_max = np.where(channel_max == 0, 1, channel_max)
+        x = (x-channel_min) / (channel_max-channel_min)
+
+        return x
+    
+    def channel_wise_max(self,x):
+        channel_max = np.max(x, axis=(0, 1), keepdims=True)
+        channel_max = np.where(channel_max == 0, 1, channel_max)
+        x = x/ channel_max
+
+        return x
+       # input_data : 3 or 12ch [curr(1), effective distance(1), empty or pdn density(1) resistances(9) or total resisntance(1)]
+        # how to apply norm before rotate transforms
+    
+    def sample_per_z_norm(self,x):
+        return (x - x.mean())/x.std()
+
+    def std_norm(self,x):
+        return x/0.00038944 # cache384
+    
+    def z_norm(self,x):
+        return (x-0.00112233)/0.00038944
+    
     def __getitem__(self, idx):
-        if self.preload:
-            # Return preloaded data
-            input_data, ir_drop = self.cached_data[idx]
+        input_data, ir_drop = self._load_data_from_disk(idx) if self.in_ch != 2 else self._load_data_from_disk_2ch(idx)
+        input_data= self.resize.apply(input_data,interpolation=cv2.INTER_AREA)
+        input_data = self.channel_wise_min_max(input_data)
+
+        if not self.use_raw:
+            ir_drop = self.resize.apply_to_mask(ir_drop,interpolation=cv2.INTER_AREA)
+            # ir_drop *= 100 
+            ir_drop = self._norm(ir_drop)
+
+        if self.train:
+            transformed = self.train_transform(image=input_data, mask=ir_drop)
         else:
-            # Load data from disk
-            input_data, ir_drop = self._load_data_from_disk(idx) if self.in_ch != 2 else self._load_data_from_disk_2ch(idx)
-        
-        # Apply transformations
-        transformed = self.transform(image=input_data, mask=ir_drop)
+            transformed = self.val_transform(image=input_data, mask=ir_drop)
         input_tensor = transformed['image']
-        target_tensor = transformed['mask']
-        if self.in_ch==1:
-            input_tensor = input_tensor[0].unsqueeze(0)
+        target_tensor = transformed['mask'].unsqueeze(0) if not self.use_raw else torch.as_tensor(ir_drop).unsqueeze(0)
+        
 
         if self.return_case:
             testcase_name = [_ for _ in self.data_files[idx]['current'].split('/') if 'testcase' in _][0]
@@ -531,7 +559,7 @@ class TestASAP7Dataset(Dataset):
         self.use_raw = use_raw
 
         self.transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA),
             A.OneOf([
                 A.HorizontalFlip(p=1),
                 A.VerticalFlip(p=1),
@@ -544,7 +572,7 @@ class TestASAP7Dataset(Dataset):
         ])
 
         self.val_transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA),
             ToTensorV2()
         ])
 
@@ -624,7 +652,7 @@ class TestASAP7Dataset(Dataset):
         except FileNotFoundError:
             raise FileNotFoundError(f"Missing voltage map file at index {idx}")
         if not self.use_irreg and current.shape != ir_drop.shape:
-            ir_drop = cv2.resize(ir_drop, (current.shape[1], current.shape[0]), interpolation=cv2.INTER_NEAREST)
+            ir_drop = cv2.resize(ir_drop, (current.shape[1], current.shape[0]), interpolation=cv2.INTER_AREA)
 
         resistance_stack = []
         for layer in self.target_layers:
@@ -651,7 +679,7 @@ class TestASAP7Dataset(Dataset):
 
         # Resize voltage if use_irreg is False and shapes don't match
         if not self.use_irreg and current.shape != ir_drop.shape:
-            ir_drop = cv2.resize(ir_drop, (current.shape[1], current.shape[0]), interpolation=cv2.INTER_NEAREST)
+            ir_drop = cv2.resize(ir_drop, (current.shape[1], current.shape[0]), interpolation=cv2.INTER_AREA)
 
         resistance_stack = []
         for layer in self.target_layers:
@@ -701,7 +729,7 @@ class TestASAP7Dataset(Dataset):
         
         transformed = self.transform(image=input_data, mask=target_data)
         input_tensor = transformed['image']
-        target_tensor = transformed['mask']
+        target_tensor = transformed['mask'].unsqueeze(0)
         if self.in_ch==1:
             input_tensor = input_tensor[0].unsqueeze(0)
 
@@ -743,17 +771,6 @@ def build_dataset_asap7_cross_val(root_path, target_layers, img_size=512, use_ir
         
         cross_val_datasets.append((train_dataset, val_dataset))
 
-    # example uasge    
-    # root_path = '/data/real-circuit-benchmarks/asap7/numpy_data'
-    # target_layers = ['m2', 'm5', 'm6', 'm7', 'm8', 'm25', 'm56', 'm67', 'm78']
-    # datasets = build_dataset_asap7_cross_val(root_path, target_layers, img_size=512, use_irreg=False, preload=True)
-    # # datasets는 4개의 (train_dataset, val_dataset) 튜플을 포함하는 리스트입니다.
-    # # 각 튜플은 한 fold의 훈련 세트와 검증 세트를 나타냅니다.
-    # # 사용 예시:
-    # for fold, (train_dataset, val_dataset) in enumerate(datasets):
-    #     print(f"Fold {fold + 1}:")
-    #     print(f"  Training set size: {len(train_dataset)}")
-    #     print(f"  Validation set size: {len(val_dataset)}")
 
     return cross_val_datasets
 
@@ -802,7 +819,10 @@ def build_dataset_5m(img_size=256,train=True,
                  in_ch=2,use_raw=False, unit='1um',train_auto_encoder=False,
                  root_path = '/data',inn=False):
     # root_path = "/data"
-    selected_folders = [f'pdn_4th_4types/{unit}_numpy',f'pdn_3rd_4types/{unit}_numpy']
+    # 5th는 기존 ir max 기준으로 수정버전
+    selected_folders = [f'pdn_4th_4types/{unit}_numpy',
+                        f'pdn_3rd_4types/{unit}_numpy', 
+                        f'pdn_data_6th/{unit}_numpy']
     post_fix = ""
     dataset = IRDropDataset5nm(root_path=root_path,
                                img_size=img_size,
@@ -811,6 +831,7 @@ def build_dataset_5m(img_size=256,train=True,
                                 post_fix_path=post_fix,
                                 in_ch=in_ch,
                                 use_raw=use_raw,
+                                dbu_per_px=unit,
                                 )
     if train_auto_encoder:
         dataset = IRDropInferenceAutoencoderDataset5nm(
@@ -873,7 +894,6 @@ def build_dataset_5m_test(img_size=256,
     
 ################################################################################
 def split_train_val(dataset, train_ratio=0.8, random_state=42):
-    assert np.isclose(train_ratio, 0.8), "train_ratio must be 0.8 for an 8:2 split"
     from copy import deepcopy
     # 전체 데이터셋 크기
     dataset_size = len(dataset)
@@ -912,7 +932,7 @@ def build_dataset_iccad(finetune=False,pdn_density_p=0.0,pdn_zeros=False,in_ch=1
 def build_dataset_iccad_finetune(pdn_density_p=0.0,return_case=False,in_ch=12,img_size=512,pdn_zeros=False,preload=False,use_raw=False):
     root_path='/data/ICCAD_2023/real-circuit-data_20230615'
     testcase_folders = os.listdir(root_path)
-    train_dataset = IRDropFineTuneDataset(root_path=root_path,
+    dataset = IRDropFineTuneDataset(root_path=root_path,
                         selected_folders=testcase_folders,
                         img_size=img_size,
                         target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
@@ -924,9 +944,14 @@ def build_dataset_iccad_finetune(pdn_density_p=0.0,return_case=False,in_ch=12,im
                         use_raw=use_raw
                     )
 
+
+    return split_train_val(dataset,train_ratio=0.8)
+
+
+def build_dataset_iccad_hidden(pdn_density_p=0.0,return_case=False,in_ch=12,img_size=512,pdn_zeros=False,preload=False,use_raw=False):
     root_path='/data/ICCAD_2023/hidden-real-circuit-data'
     testcase_folders = os.listdir(root_path)
-    val_dataset = IRDropFineTuneDataset(root_path=root_path,
+    test_dataset = IRDropFineTuneDataset(root_path=root_path,
                         selected_folders=testcase_folders,
                         img_size=img_size,
                         target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
@@ -938,7 +963,7 @@ def build_dataset_iccad_finetune(pdn_density_p=0.0,return_case=False,in_ch=12,im
                         pdn_zeros=pdn_zeros,
                         use_raw=use_raw
                     )
-    return train_dataset,val_dataset
+    return test_dataset
 
 def build_dataset_began_asap7(finetune=False,train=True,in_ch=12,img_size=512,use_raw=False):
     if finetune:

@@ -88,9 +88,17 @@ def default_and_edge(predicted, target,):
 
     return mae_l + edge
 
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        
+    def forward(self,pred,y):
+        return torch.sqrt(self.mse(pred,y))
+    
 class LossSelect(nn.Module):
     def __init__(self, loss_type='default',lambda_fn_dict={},
-                 use_cache=False,dice_q=0.9,loss_with_logit=True,post_min_max=False) -> None:
+                 use_cache=False,dice_q=0.9,post_min_max=False) -> None:
         '''
         lambda_fn_dict : {
                     'loss_1':[weight_1,loss_type_1],
@@ -100,7 +108,6 @@ class LossSelect(nn.Module):
         '''
         super().__init__()
         print(f'loss type : {loss_type}')
-        self.loss_with_logit =loss_with_logit
         self.post_min_max = post_min_max
 
         if use_cache:
@@ -133,6 +140,8 @@ class LossSelect(nn.Module):
         loss_fn=None
         if self.loss_type=='default':
             loss_fn = CustomLoss(lambda_param=2)
+        elif self.loss_type=='rmse':
+            loss_fn = RMSELoss()
         elif self.loss_type=='mse':
             loss_fn = F.mse_loss
         elif self.loss_type=='mae':
@@ -159,10 +168,25 @@ class LossSelect(nn.Module):
             loss_fn = AvgQIRDiceLoss()
         elif self.loss_type == 'pice':
             loss_fn = ProdQIRDiceLoss()
+        elif self.loss_type == 'dlfs':
+            loss_fn = DiceLossforSeg()
         elif self.loss_type in ['kl', 'js', 'wasserstein', 'correlation', 'histogram_matching','kl_restoration']:
             loss_fn = PixelDistributionLoss(loss_type=self.loss_type)
         elif self.loss_type == 'ec_ssim': # Error-Centric SSIM Loss (EC-SSIM Loss)
             loss_fn = ECSSIMLoss()
+        elif self.loss_type == 'ms_ssim_dice_ec_ssim':
+            self.lambda_fn_dict={
+                'loss_1':[1.,'ms_ssim'],
+                'loss_2':[0.1,'dice'],
+                'loss_2':[0.3,'ec_ssim'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'huber_dice':
+            self.lambda_fn_dict={
+                'loss_1':[1.,'huber'],
+                'loss_2':[0.2,'dice'],
+            }
+            loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_mae_ec_ssim_dice':
             self.lambda_fn_dict={
                 'loss_1':[0.4,'ssim'],
@@ -185,6 +209,14 @@ class LossSelect(nn.Module):
                 'loss_2':[0.1,'ec_ssim'],
                 'loss_3':[0.4,'mae'],
                 'loss_3':[0.1,'pice'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_huber_dice_ec_ssim':
+            self.lambda_fn_dict={
+                'loss_1':[1.,'ms_ssim'],
+                'loss_2':[0.2,'ec_ssim'],
+                'loss_3':[1.,'huber'],
+                'loss_3':[0.1,'dice'],
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ms_ssim_mae_ec_ssim_aice':
@@ -271,7 +303,7 @@ class LossSelect(nn.Module):
         elif self.loss_type == 'ms_ssim_dice':
             self.lambda_fn_dict={
                 'loss_2':[1,'ms_ssim'],
-                'loss_3':[0.1,'dice'],
+                'loss_3':[0.2,'dice'],
             }
             loss_fn = self.combined_loss  
         elif self.loss_type == 'ssim_dice_mae':
@@ -345,8 +377,9 @@ class LossSelect(nn.Module):
     def combined_loss(self, pred, target):
         total_loss = 0.
         for apply_name, (weight, loss_type) in self.lambda_fn_dict.items():
-            # pred,target = self.make_logits(pred,target,apply_name)
             self.loss_type = loss_type
+            if 'ssim' in apply_name:
+                target =  min_max_norm(target)
             loss_fn = self.get_fn()
             loss = loss_fn(pred, target)
             total_loss += weight * loss
@@ -385,44 +418,37 @@ class LossSelect(nn.Module):
             return pred, target
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self,loss_type,dice_q, alpha=0.8, beta=0.1, gamma=0.1,**kwargs):
+    def __init__(self,loss_types=['',''],dice_q=0.995, alpha=0.5, beta=0.5, gamma=0.1,**kwargs):
         super().__init__()
-        self.loss_type = loss_type
-        self.criterion_recon = LossSelect(loss_type,dice_q=dice_q)
-        self.criterion_loc = ProdQIRDiceLoss() # IRDiceLoss(q=dice_q)
-        self.criterion_error = nn.MSELoss()
+        self.loss_type = loss_types[0]
+        self.loss_type_aux = loss_types[1]
+        self.criterion_recon = LossSelect(self.loss_type,dice_q=dice_q)
+        self.criterion_loc = LossSelect(self.loss_type_aux,dice_q=dice_q) 
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
+        self.eps = 1e-6
 
     def forward(self,outputs,targets):
-        # x_recon, loc_hat, error_hat = outputs['x_recon'],outputs['loc'],outputs['error']
         x_recon, loc_hat= outputs['x_recon'],outputs['loc']
-        # error_true = targets - x_recon
         loss_recon = self.criterion_recon(x_recon,targets)
+        
+        targets = self.min_max_norm_for_aux(targets)
         loss_loc = self.criterion_loc(loc_hat,targets)
-        # loss_error = self.criterion_error(error_hat,error_true)
 
         return loss_recon * self.alpha + loss_loc * self.beta
 
+    def min_max_norm_for_aux(self,targets):
+        B = targets.size(0)
+        target_flat = targets.view(B, -1)  # [B, C*H*W]
+        mins = target_flat.min(dim=1, keepdim=True)[0].view(B, 1, 1, 1)  # [B,1,1,1]
+        maxs = target_flat.max(dim=1, keepdim=True)[0].view(B, 1, 1, 1)  # [B,1,1,1]
+        return  (targets - mins) / (maxs - mins + self.eps)   
+
+
 ############ Scaling ############################
-# def min_max_norm(x):
-#     return (x-x.min()+1e-5)/(x.max()-x.min()+1e-5)
-def min_max_norm(x, min_val=None, max_val=None):
-    if min_val is None:
-        min_val = x.amin(dim=(1, 2), keepdim=True)
-    if max_val is None:
-        max_val = x.amax(dim=(1, 2), keepdim=True)
-    return (x - min_val) / (max_val - min_val + 1e-8), min_val, max_val
-
-def inverse_min_max_norm(x, min_val, max_val):
-    return x * (max_val - min_val) + min_val
-
-def log_scale(x, epsilon=1.0):
-    return torch.log(x + epsilon)
-
-def inverse_log_scale(x, epsilon=1.0):
-    return torch.exp(x) - epsilon
+def min_max_norm(x):
+    return (x-x.min()+1e-5)/(x.max()-x.min()+1e-5)
 
 # # 모델의 예측 값과 실제 값 (예시로 가상의 데이터를 사용)
 # predictions = torch.tensor([[0.9, 0.8], [0.4, 0.6]], requires_grad=True)

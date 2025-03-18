@@ -11,12 +11,12 @@ import torch.nn.functional as F
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from config import IRDropConfig as C
+from config import get_config
 
 class IRDropDataset5nm(Dataset):
     def __init__(self, root_path, selected_folders,
                  img_size=256, post_fix_path='', train=True,
-                 in_ch=2, use_raw=False):
+                 in_ch=2, use_raw=False,dbu_per_px=''):
         """
         기본 데이터셋:
           - in_ch==2: current + (전체 resistance를 합산한 값)
@@ -31,22 +31,23 @@ class IRDropDataset5nm(Dataset):
         self.train = train
         self.in_ch = in_ch
         self.use_raw = use_raw
+        self.dbu_per_px = dbu_per_px
+        self.conf = get_config(dbu_per_px).ir_drop
+        print('ir_conf : ',self.conf)
 
         self.transform = A.ReplayCompose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
-            A.OneOf([
-                A.HorizontalFlip(p=1),
-                A.VerticalFlip(p=1),
-                A.Rotate(limit=(90, 90), p=1),
-                A.Rotate(limit=(180, 180), p=1),
-                A.Rotate(limit=(270, 270), p=1),
-                A.NoOp(p=1)
-            ], p=1),
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA),
+            A.HorizontalFlip(p=0.3),
+            A.VerticalFlip(p=0.3),
+            A.Rotate(limit=(90, 90), p=0.3),
+            A.Rotate(limit=(180, 180), p=0.3),
+            A.Rotate(limit=(270, 270), p=0.3),
+            # A.NoOp(p=1),
             ToTensorV2()
         ], additional_targets={'mask': 'mask'}, is_check_shapes=False)
 
         self.val_transform = A.Compose([
-            A.Resize(img_size, img_size, interpolation=cv2.INTER_NEAREST),
+            A.Resize(img_size, img_size, interpolation=cv2.INTER_AREA) ,
             ToTensorV2()
         ], is_check_shapes=False)
 
@@ -123,7 +124,6 @@ class IRDropDataset5nm(Dataset):
                 'pad_distance': pad_distance
             })
         
-        # print(f'__load_data_files : {len(self.data_files)} found.')
 
     def _load_data_from_disk_2ch(self, idx):
         file_group = self.data_files[idx]
@@ -139,7 +139,6 @@ class IRDropDataset5nm(Dataset):
             debug_list.append(resistance_stack[-1].shape)
 
         try:
-            # resistance들을 합산하여 단일 채널로 만듦
             resistance_stack = np.stack(resistance_stack, axis=-1).sum(-1)
         except:
             print(debug_list)
@@ -161,19 +160,10 @@ class IRDropDataset5nm(Dataset):
         return input_data_3ch, ir_drop
 
     def _load_data_from_disk_25ch(self, idx):
-        """
-        in_ch==25인 경우:
-          - current (1채널)
-          - pad_distance (1채널)
-          - resistance map 23개 (각각 1채널)
-          → 총 25채널 데이터를 만듭니다.
-        """
         file_group = self.data_files[idx]
-        # current와 pad_distance 로드 및 정규화
         current = self._norm(np.load(file_group['current']))
         pad_distance = self._norm(np.load(file_group['pad_distance']))
 
-        # resistance map들을 개별 채널로 로드
         resistance_maps = []
         for res_file in file_group['resistances']:
             resistance_map = np.load(res_file)
@@ -203,10 +193,26 @@ class IRDropDataset5nm(Dataset):
         else:
             transformed = self.val_transform(image=input_data, mask=ir_drop)
         input_tensor = transformed['image']
-        target_tensor = transformed['mask']
+        target_tensor = transformed['mask'] 
         target_tensor = target_tensor.permute(2, 0, 1)
         return input_tensor.float(), target_tensor.float()
 
+    def __len__(self):
+        return len(self.data_files)
+
+    def _norm(self, x):
+        return x / x.max() if x.max() > 0 else x
+      
+    def _global_max_norm(self,x):
+        return x / self.conf.max
+
+    def _min_max_norm(self, x):
+        return (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x
+
+    def _combine_3ch_data(self, current, pad_distance, resistance_total):
+        return np.stack([current, pad_distance, resistance_total], axis=-1)
+
+    
     def getitem_ir_ori(self, idx):
         input_data, ir_drop = self.load_data_fn(idx)
         # ir_drop not normalized
@@ -219,27 +225,6 @@ class IRDropDataset5nm(Dataset):
         target_tensor = target_tensor.permute(2, 0, 1)
         return input_tensor.float(), target_tensor.float()
     
-    def __len__(self):
-        return len(self.data_files)
-
-    def _norm(self, x):
-        return x / x.max() if x.max() > 0 else x
-    def _global_max_norm(self,x):
-        return x / C.max
-
-    def _min_max_norm(self, x):
-        return (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x
-    # def _min_max_norm(self,x):
-    #     # return (x) / (0.025038) # 1um
-    #     return (x) / 0.05313 # 200nm
-    def _zscore_norm(self,x): # for ir drop
-        return (x - C.mean) / C.std
-
-    def _2step_norm(self,x):
-        return (self._zscore_norm(x)-C.max) / (C.max-C.min)
-
-    def _combine_3ch_data(self, current, pad_distance, resistance_total):
-        return np.stack([current, pad_distance, resistance_total], axis=-1)
 
 class IRDropDataset5nmINN(IRDropDataset5nm):
     
@@ -269,7 +254,7 @@ class IRDropInferenceAutoencoderDataset5nm(IRDropDataset5nm):
         if root_path is not None : kwargs['root_path'] = root_path  
         super().__init__(*args, **kwargs)
         self.val_transform = A.Compose([
-            A.Resize(self.target_size, self.target_size, interpolation=cv2.INTER_NEAREST),
+            A.Resize(self.target_size, self.target_size, interpolation=cv2.INTER_AREA),
             ToTensorV2()
         ], is_check_shapes=False)
         
@@ -441,7 +426,9 @@ if __name__ =='__main__':
     def test_new_data_error_2(per= '1um'):
         root_path = "/data"
         # selected_folders = [f'pdn_data_4th/{per}_numpy', f'pdn_data_3rd_4types/{per}_numpy']
-        selected_folders = [f'pdn_4th_4types/{per}_numpy',f'pdn_3rd_4types/{per}_numpy']
+        selected_folders = [f'pdn_4th_4types/{per}_numpy',
+                            f'pdn_3rd_4types/{per}_numpy', 
+                            f'pdn_data_6th/{per}_numpy']
         post_fix = ""
 
         dataset = IRDropDataset5nm(root_path=root_path,

@@ -9,12 +9,12 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 
-from .utils import min_max_norm, DiceLoss
+from utils import min_max_norm, DiceLoss, IRDropMetrics
 
 
 class TestCaseModule:
     def __init__(self, model, checkpoint_path, dataset, batch_size=1, 
-                 device='cuda:0',norm_out=True,loss_with_logit=True,testcase_name=True):
+                 device='cuda:0',norm_out=True,loss_with_logit=True,testcase_name=True,th=0.9,mask_opt='max'):
         self.model = model
         self.checkpoint_path = checkpoint_path
         self.dataset = dataset
@@ -26,6 +26,8 @@ class TestCaseModule:
         self.loss_with_logit = loss_with_logit
         self.testcase_name = testcase_name
         self.colorbar = False
+        self.metric = IRDropMetrics(top_percent=th,how=mask_opt)
+
 
         # Load model
         self.model.load_state_dict(torch.load(self.checkpoint_path)['net'])
@@ -43,8 +45,9 @@ class TestCaseModule:
                 casename=f'dummy_{i}'
             with torch.no_grad():
                 pred = self.model(inp)
-                if not self.loss_with_logit:
-                    pred = torch.sigmoid(pred)
+                
+                if len(pred) > 1 :
+                    pred = pred['x_recon']
                 pred = pred.detach().cpu()
                 pred_logit = pred.clone()
                 # Normalization
@@ -57,7 +60,7 @@ class TestCaseModule:
             # Get metrics
             mae_map = torch.abs(pred_logit - target) if not self.norm_out else normalized_mae_map
             mae = torch.mean(mae_map).item()
-            dice_coeff, f1 = self.calculate_metrics(pred_logit, target, th=90)
+            dice_coeff, f1 = self.calculate_metrics(pred, target)
 
             # Store results in list
             results.append({'Testcase Name': casename, 'MAE': mae, 'F1 Score': f1,'Normalized MAE':normalized_mae})
@@ -138,24 +141,26 @@ class TestCaseModule:
         plt.tight_layout()
         self.figures.append(fig)
         
-    @staticmethod
-    def calculate_metrics(pred, target, th):
-        pred_np = pred.squeeze().cpu().numpy()
-        target_np = target.squeeze().cpu().numpy()
+    def calculate_metrics(self, pred, target):
+        return 0, self.metric(pred,target)['f1']
 
-        # Threshold using percentile
-        target_np = (target_np >= np.percentile(target_np, th)).astype(int)
-        pred_np = (pred_np >= np.percentile(pred_np, th)).astype(int)
+    # def calculate_metrics(pred, target, th):
+    #     pred_np = pred.squeeze().cpu().numpy()
+    #     target_np = target.squeeze().cpu().numpy()
 
-        # Dice coefficient
-        dice_coeff = 1 - DiceLoss(smooth=1.)(torch.tensor(pred_np[np.newaxis, np.newaxis, ...]),
-                                            torch.tensor(target_np[np.newaxis, np.newaxis, ...]),
-                                            )
+    #     # Threshold using percentile
+    #     target_np = (target_np >= np.percentile(target_np, th)).astype(int)
+    #     pred_np = (pred_np >= np.percentile(pred_np, th)).astype(int)
 
-        # F1 score
-        f1 = f1_score(target_np.flatten(), pred_np.flatten())
+    #     # Dice coefficient
+    #     dice_coeff = 1 - DiceLoss()(torch.tensor(pred_np[np.newaxis, np.newaxis, ...]),
+    #                                         torch.tensor(target_np[np.newaxis, np.newaxis, ...]),
+    #                                         )
 
-        return dice_coeff.item(), f1
+    #     # F1 score
+    #     f1 = f1_score(target_np.flatten(), pred_np.flatten())
+
+    #     return dice_coeff.item(), f1
     
 
 class F1ScoreEvaluator(nn.Module):

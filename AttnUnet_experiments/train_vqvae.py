@@ -35,33 +35,31 @@ parser.add_argument('--epoch', default=100, type=int, help='max epoch')
 parser.add_argument('--batch_size', default=8, type=int, help='batch size')
 parser.add_argument('--gpus', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--dataset', type=str, default='iccad', help='select BeGAN or iccad')
-parser.add_argument('--finetune', type=bool, default=False, help='pre-train or fine-tuning')
+parser.add_argument('--finetune', action='store_true', help='pre-train or fine-tuning')
 parser.add_argument('--optim', type=str, default='adam', help='opitmizer')
 parser.add_argument('--dropout', type=str, default='dropblock', help='for attnV2')
-parser.add_argument('--arch', type=str, default='attn_12ch', help='sup model : [attn_12ch, attn_base_12ch, attnv2, vqvae]') # vqvae 추가
+parser.add_argument('--arch', type=str, default='attn_12ch', help='sup model : [attn_12ch, attn_base_12ch, attnv2, vqvae]')
 parser.add_argument('--loss', type=str, default='default', help='sup loss : [default, comb, default_edge,edge,ssim,dice]')
 parser.add_argument('--weight_decay', type=float, default=5e-4, help='prev : 5e4')
 parser.add_argument('--dice_q', type=float, default=0.9, help='top %')
 parser.add_argument('--pdn_density_dropout', type=float, default=0.0, help='0.~1. 0: False, 1 : always')
-parser.add_argument('--loss_with_logit', type=bool, default=True, help='if False, apply sigmoid fn')
 parser.add_argument('--post_fix', type=str, default='', help='post fix of finetune checkpoint path')
 parser.add_argument('--scheduler', type=str, default='consineanealingwarmup', help='lr scheduler')
-parser.add_argument('--cross_val', type=bool, default=False, help='for asap7 dataset training')
-parser.add_argument('--pdn_zeros', type=bool, default=False, help='eff_dist, pdn_density channels zeros')
+parser.add_argument('--cross_val', action='store_true', help='for asap7 dataset training')
+parser.add_argument('--pdn_zeros', action='store_true', help='eff_dist, pdn_density channels zeros')
 parser.add_argument('--in_ch', type=int, default=12, help='1 : only use current map')
 parser.add_argument('--img_size', type=int, default=512, help='input img_size')
-parser.add_argument('--mixed_precision', type=bool, default=False, help='mixed_precision')
+parser.add_argument('--mixed_precision', action='store_true', help='mixed_precision')
 parser.add_argument('--monitor', type=str, default='f1', help='monitor metric')
-parser.add_argument('--use_raw', type=bool, default=False, help='not normalized ir drop map.')
-parser.add_argument('--vqvae_size', type=str, default='default', help='vqvae model size : [default, small, large]') # vqvae_size 추가
-parser.add_argument('--post_min_max', type=bool, default=False, help='if True, min_max_norm(model(x)) ') 
+parser.add_argument('--use_raw', action='store_true', help='not normalized ir drop map.')
+parser.add_argument('--vqvae_size', type=str, default='default', help='vqvae model size : [default, small, large]')
+parser.add_argument('--post_min_max', action='store_true', help='if True, min_max_norm(model(x)) ') 
 parser.add_argument('--use_ema', action='store_true', help='vq ema')
 parser.add_argument('--dbu_per_px', type=str, default='1um', help='210nm or 1um')
 parser.add_argument('--checkpoint_path', type=str, default='', help='')
+parser.add_argument('--metric_type', type=str, default='max', help='max or quantile')
 parser.add_argument('--num_embeddings', type=int, default=512, help='number of codebooks vector')
-
 args = parser.parse_args()
-
 
 
 
@@ -74,9 +72,9 @@ class IRDropPrediction(LightningModule):
         self.use_ema = args.use_ema
 
         self.model = build_model(args.arch,args.dropout,args.finetune,args.in_ch,self.use_ema,num_embeddings=args.num_embeddings)
-        if args.finetune:
-            self.model = init_weights_chkpt(self.model,args.save_folder)
-        elif args.checkpoint_path:
+        # if args.finetune:
+            # self.model = init_weights_chkpt(self.model,args.save_folder)
+        if args.checkpoint_path:
             self.model = init_weights_chkpt(self.model,args.checkpoint_path)
         else:
             if 'attn' in args.arch: 
@@ -85,12 +83,11 @@ class IRDropPrediction(LightningModule):
         self.criterion = LossSelect(loss_type=args.loss,
                                     use_cache=True if args.loss == 'cache' else False,
                                     dice_q=args.dice_q,
-                                    loss_with_logit=args.loss_with_logit,
                                     post_min_max=args.post_min_max
                                     ) #nn.MSELoss() #combined_loss #CustomLoss() #nn.MSELoss()
         print(self.criterion.loss_type)
         print('use ema : ', self.use_ema)
-        self.metrics = IRDropMetrics(loss_with_logit=args.loss_with_logit,post_min_max=args.post_min_max)
+        self.metrics = IRDropMetrics(post_min_max=args.post_min_max,how=args.metric_type)
         # self.save_hyperparameters()
 
     def forward(self, x):
@@ -99,14 +96,14 @@ class IRDropPrediction(LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
         outputs = self(inputs)
-        dictionary_loss = outputs['dictionary_loss']
-        commitment_loss = outputs['commitment_loss']
+        dictionary_loss = outputs.get('dictionary_loss',0)
+        commitment_loss = outputs.get('commitment_loss',0)
         recon_loss = self.criterion(outputs['x_recon'], targets)
 
-        if self.use_ema:
-            loss = recon_loss + commitment_loss
-        else:
-            loss = recon_loss + dictionary_loss + commitment_loss
+        # if self.use_ema:
+        #     loss = recon_loss + commitment_loss
+        # else:
+        loss = recon_loss + dictionary_loss + commitment_loss
         
 
         metrics = self.metrics.compute_metrics(outputs['x_recon'] , targets)
@@ -118,8 +115,8 @@ class IRDropPrediction(LightningModule):
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
         outputs = self(inputs)
-        dictionary_loss = outputs['dictionary_loss']
-        commitment_loss = outputs['commitment_loss']
+        dictionary_loss = outputs.get('dictionary_loss',0)
+        commitment_loss = outputs.get('commitment_loss',0)
         recon_loss = self.criterion(outputs['x_recon'], targets)
 
         if self.use_ema:
@@ -256,10 +253,9 @@ def init_weights_chkpt(model, save_folder):
 class CustomCheckpoint(Callback):
     def __init__(self, checkpoint_dir, repeat_idx, metric_name='val_mae', mode='min',post_fix=''):
         super().__init__()
-        checkpoint_dir = os.path.join(checkpoint_dir,args.vqvae_size)
         self.checkpoint_dir = checkpoint_dir if args.post_fix == '' else f'{checkpoint_dir}/{args.post_fix}'
         if args.finetune:
-            self.checkpoint_dir = os.path.join(self.checkpoint_dir,'finetune',args.loss,post_fix)
+            self.checkpoint_dir = os.path.join(args.checkpoint_path,'finetune',args.dataset,args.loss,post_fix)
         self.best_metric = float('inf') if mode == 'min' else float('-inf')
         self.best_model_file_name = ""
         self.repeat_idx = repeat_idx
@@ -284,7 +280,7 @@ class CustomCheckpoint(Callback):
                         old_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
                         os.remove(old_path)
                     use_ema_str = 'use_ema' if args.use_ema else 'non_ema'
-                    self.best_model_file_name = f'{args.arch}_embd{args.num_embeddings}_{use_ema_str}_{trainer.current_epoch}_{val_metric:.4f}.pth'
+                    self.best_model_file_name = f'{args.arch}_embd{args.num_embeddings}_{args.metric_type}_{trainer.current_epoch}_{val_metric:.4f}.pth'
                     new_path = os.path.join(self.checkpoint_dir, self.best_model_file_name)
                     os.makedirs(self.checkpoint_dir, exist_ok=True)
                     torch.save(state, new_path)
@@ -299,7 +295,6 @@ def make_logdir():
         logdir = os.path.join(args.log_dir,f'{args.in_ch}/{args.arch}/{args.dataset}/{args.loss}')
         if args.arch == 'attnv2':   logdir = os.path.join(logdir,args.dropout)
     
-    if not args.loss_with_logit:logdir = os.path.join(logdir,'sigmoid')
     logdir = f'{logdir}' if args.post_fix =='' else f'{logdir}/{args.post_fix}'
 
     return logdir
