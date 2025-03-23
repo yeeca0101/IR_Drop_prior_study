@@ -270,7 +270,7 @@ class Attention4DDownsample(nn.Module):
 class Embedding(nn.Module):
     def __init__(self, patch_size=3, stride=2, padding=1,
                  in_chans=3, embed_dim=768, norm_layer=nn.BatchNorm2d,
-                 light=False, asub=False, resolution=None, act_layer=nn.ReLU,
+                 light=False, asub=False, resolution=None, act_layer=nn.GELU,
                  attn_block=Attention4DDownsample):
         super().__init__()
         self.light = light
@@ -572,4 +572,4 @@ def test_all_models(device="cpu"):
 
 
 if __name__ == '__main__':
-    test_all_models(device="cpu")
+    test_all_models(device="cuda:0")

@@ -142,6 +142,8 @@ class LossSelect(nn.Module):
             loss_fn = CustomLoss(lambda_param=2)
         elif self.loss_type=='rmse':
             loss_fn = RMSELoss()
+        elif self.loss_type=='combo':
+            loss_fn = IRDropLoss() #nan
         elif self.loss_type=='mse':
             loss_fn = F.mse_loss
         elif self.loss_type=='mae':
@@ -170,8 +172,10 @@ class LossSelect(nn.Module):
             loss_fn = ProdQIRDiceLoss()
         elif self.loss_type == 'dlfs':
             loss_fn = DiceLossforSeg()
-        elif self.loss_type in ['kl', 'js', 'wasserstein', 'correlation', 'histogram_matching','kl_restoration']:
-            loss_fn = PixelDistributionLoss(loss_type=self.loss_type)
+        elif self.loss_type == 'wmape':
+            loss_fn = WeightedMAPELoss(threshold_mode='quantile',threshold_factor=0.8,weight_factor=1.5)
+        elif self.loss_type == 'mape':
+            loss_fn = IRMAPE()
         elif self.loss_type == 'ec_ssim': # Error-Centric SSIM Loss (EC-SSIM Loss)
             loss_fn = ECSSIMLoss()
         elif self.loss_type == 'ms_ssim_dice_ec_ssim':
@@ -185,6 +189,18 @@ class LossSelect(nn.Module):
             self.lambda_fn_dict={
                 'loss_1':[1.,'huber'],
                 'loss_2':[0.2,'dice'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'huber_wmape':
+            self.lambda_fn_dict={
+                'loss_1':[1.,'huber'],
+                'loss_2':[0.8,'wmape'],
+            }
+            loss_fn = self.combined_loss
+        elif self.loss_type == 'ms_ssim_huber':
+            self.lambda_fn_dict={
+                'loss_1':[1.,'ms_ssim'],
+                'loss_2':[1.,'huber'],
             }
             loss_fn = self.combined_loss
         elif self.loss_type == 'ssim_mae_ec_ssim_dice':
@@ -342,12 +358,10 @@ class LossSelect(nn.Module):
                 'loss_3':[1,'mae'],
             }
             loss_fn = self.combined_loss
-        elif self.loss_type == 'ms_ssim_dice_mae_fsim':
+        elif self.loss_type == 'ssim_mape':
             self.lambda_fn_dict={
-                'loss_1':[1.,'ms_ssim'],
-                'loss_2':[0.05,'dice'],
-                'loss_3':[0.5,'mae'],
-                'loss_4':[0.05,'fsim'],
+                'loss_1':[1.,'ssim'],
+                'loss_4':[1.,'mape'],
             }
             loss_fn = self.combined_loss  
         ##### distribution #########

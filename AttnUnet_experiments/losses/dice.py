@@ -139,10 +139,6 @@ class IRDiceLoss(nn.Module):
         else:
             mask = torch.ones_like(pred)
 
-        # Apply sigmoid to predictions
-        pred = torch.sigmoid(pred) 
-        target = torch.sigmoid(target)
-
         # Flatten pred and target for mask calculation
         pred_flat = pred.view(B, -1)  # (B, H*W)
         target_flat = target.view(B, -1)  # (B, H*W)
@@ -177,7 +173,7 @@ class IRDiceLoss(nn.Module):
     
         pred_max = torch.max(pred,dim=1,keepdim=True)[0]
         target_max = torch.max(target,dim=1,keepdim=True)[0]
-        scale_loss = F.l1_loss(target_threshold+pred_max, target_threshold+target_max)  # 예측분위수와 타겟분위수 정합
+        scale_loss = F.l1_loss(pred_max, target_max)  
 
         return loss.mean() + scale_loss
 

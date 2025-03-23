@@ -43,6 +43,7 @@ parser.add_argument('--cross_val', action='store_true', help='for asap7 dataset 
 parser.add_argument('--pdn_zeros', action='store_true', help='pdn density channels zeros')
 parser.add_argument('--in_ch', type=int, default=12, help='number of input channels')
 parser.add_argument('--img_size', type=int, default=512, help='input image size')
+parser.add_argument('--th', type=float, default=0.9, help='hotspot threshold')
 parser.add_argument('--mixed_precision', action='store_true', help='mixed precision evaluation')
 parser.add_argument('--monitor', type=str, default='f1', help='monitor metric')
 parser.add_argument('--use_raw', action='store_true', help='use raw ir drop map (not normalized)')
@@ -72,7 +73,7 @@ class IRDropPrediction(LightningModule):
         self.criterion = nn.MSELoss()
 
         print("Loss type:", self.criterion.__class__.__name__)
-        self.metrics = IRDropMetrics(post_min_max=args.post_min_max)
+        self.metrics = IRDropMetrics(post_min_max=args.post_min_max,top_percent=args.th)
 
     def forward(self, x):
         return self.model(x)
@@ -80,13 +81,14 @@ class IRDropPrediction(LightningModule):
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
         outputs = self(inputs)['x_recon']
+
+        if args.use_raw:
+            outputs = F.interpolate(outputs,targets.shape[-2:],mode='area')
+            outputs = self.val_dataset.dataset.inverse(outputs,'g_max')
+
         loss = self.criterion(outputs, targets)
-
-        # if args.use_raw:
-        #     outputs = self.val_dataset.inverse(outputs)
-        #     outputs = F.interpolate(outputs,targets.shape[-2:],mode='area')
-
         metrics = self.metrics.compute_metrics(outputs, targets)
+
         self.log('val_loss', loss, prog_bar=True, sync_dist=True)
         self.log('val_f1', metrics['f1'], prog_bar=True, sync_dist=True)
         self.log('val_mae', metrics['mae'], prog_bar=True, sync_dist=True)
@@ -156,12 +158,14 @@ class IRDropPrediction(LightningModule):
                                                                                    in_ch=args.in_ch,
                                                                                    img_size=args.img_size,
                                                                                    use_raw=args.use_raw)
-
-        
-        def test_dt(dt):
-            inp = dt.__getitem__(0)[0]
-            assert args.in_ch == inp.size(0), f"{args.in_ch} is not matching {inp.size(0)}"
-        test_dt(self.val_dataset)
+            elif args.dataset.lower() == 'cus':
+                print('selected folders : ',args.dbu_per_px)
+                self.train_dataset, self.val_dataset = build_dataset_5m(img_size=args.img_size,
+                                                                        use_raw=args.use_raw,
+                                                                        in_ch=args.in_ch,
+                                                                        train=True,
+                                                                        unit=args.dbu_per_px
+                                                                                   )
 
   
     def val_dataloader(self):
@@ -170,12 +174,18 @@ class IRDropPrediction(LightningModule):
 
 # checkpoint 폴더 내 최신 파일을 불러오는 함수 (train.py와 동일)
 def init_weights_chkpt(model, checkpoint_folder):
-    checkpoint_files = [f for f in os.listdir(checkpoint_folder) if f.endswith('.pth')]
-    if not checkpoint_files:
-        raise FileNotFoundError(f"No checkpoint files found in {checkpoint_folder}")
-    # 파일 이름 마지막에 붙은 숫자를 기준으로 정렬 (최신 모델)
-    checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
-    checkpoint_path = os.path.join(checkpoint_folder, checkpoint_files[0])
+    if os.path.isdir(checkpoint_folder):
+        checkpoint_files = [f for f in os.listdir(checkpoint_folder) if f.endswith('.pth')]
+        if not checkpoint_files:
+            raise FileNotFoundError(f"No checkpoint files found in {checkpoint_folder}")
+        # 파일 이름 마지막에 붙은 숫자를 기준으로 정렬 (최신 모델)
+        checkpoint_files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]), reverse=True)
+        checkpoint_path = os.path.join(checkpoint_folder, checkpoint_files[0])
+    elif os.path.isfile(checkpoint_folder):
+        checkpoint_path = checkpoint_folder
+    else:
+        raise NameError('check your checkpoint path')
+    
     print(f"Loading checkpoint from: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
     model.load_state_dict(checkpoint['net'])

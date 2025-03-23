@@ -152,19 +152,19 @@ class DiceLoss:
 def to_numpy(x):
     return x.detach().cpu().numpy()
 
-def calculate_metrics(pred, target, mask_opt):
+def calculate_metrics(pred, target, mask_opt,top_region=0.9):
     # torch 기반으로 threshold 계산
     if mask_opt == 'max':
-        threshold = torch.max(target) * 0.9
+        threshold = torch.max(target) * top_region
         target_bin = (target >= threshold).int()
         pred_bin = (pred >= threshold).int()
     elif 'quantile' in mask_opt:
-        threshold_t = torch.quantile(target, 0.9)
-        threshold_p = torch.quantile(pred, 0.9)
+        threshold_t = torch.quantile(target, top_region)
+        threshold_p = torch.quantile(pred, top_region)
         target_bin = (target >= threshold_t).int()
         pred_bin = (pred >= threshold_p).int()
     elif 'quantile_target' in mask_opt:
-        threshold_t = torch.quantile(target, 0.9)
+        threshold_t = torch.quantile(target, top_region)
         target_bin = (target >= threshold_t).int()
         pred_bin = (pred >= threshold_t).int()
     else:
@@ -180,7 +180,7 @@ def calculate_metrics(pred, target, mask_opt):
     # mae_10 계산 (mask된 부분만)
     mask = target_bin == 1
     diff = torch.abs(pred - target)
-    print(f'target region : {target[mask].shape[0]}')
+    print(f'top_region : {target[mask].shape[0]}')
     if mask.sum() > 0:  # 마스크된 부분이 있는 경우
         mae_10 = diff[mask].mean().item()
     else:  # 마스크가 없는 경우

@@ -12,8 +12,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from sklearn.model_selection import KFold
 
-from ir_dataset_5nm import IRDropDataset5nm, IRDropInferenceAutoencoderDataset5nm, IRDropDataset5nmINN
-
+from ir_dataset_5nm import IRDropDataset5nm
 class IRDropDataset(Dataset):
     def __init__(self, root_path, selected_folders, target_layers, 
                  csv_path=None, img_size=512, post_fix_path='data', preload=False,train=True,pdn_density_p=0.0,
@@ -833,25 +832,7 @@ def build_dataset_5m(img_size=256,train=True,
                                 use_raw=use_raw,
                                 dbu_per_px=unit,
                                 )
-    if train_auto_encoder:
-        dataset = IRDropInferenceAutoencoderDataset5nm(
-                                root_path=root_path,
-                               img_size=img_size,
-                               train=train,
-                                selected_folders=selected_folders,
-                                post_fix_path=post_fix,
-                                in_ch=in_ch,
-                                use_raw=use_raw
-        )
-    elif inn:
-        dataset = IRDropDataset5nmINN(root_path=root_path,
-                               img_size=img_size,
-                               train=train,
-                                selected_folders=selected_folders,
-                                post_fix_path=post_fix,
-                                in_ch=in_ch,
-                                use_raw=use_raw,
-                                )
+
 
     print(dataset.__len__())
     if train:

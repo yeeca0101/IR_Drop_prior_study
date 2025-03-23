@@ -12,3 +12,5 @@ csv
 *.png
 *.npy
 *.csv
+
+*ipynb
