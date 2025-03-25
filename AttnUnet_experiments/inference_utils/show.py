@@ -47,21 +47,25 @@ def predict_and_visualize(dataset, model, checkpoint_path,
     if norm_out:
         pred = min_max_norm(pred)
 
-    target_min = None
-    target_max = None
+    target_min = target.min()
+    target_max = target.max()
     if use_raw :
-        target_min = target.min()
-        target_max = target.max()
         _, t_h, t_w = target.shape
-        pred = F.interpolate(pred.unsqueeze(0), size=(1,t_h, t_w), mode='area').squeeze(0)
-        if t_norm_type=='g_max':
-            pred= pred * dataset.dataset.conf.max
+        if t_norm_type in ['g_max','global_max']:
+            pred= pred * dataset.dataset.conf.ir_drop.max
         elif t_norm_type=='min_max':
             pred = (target_max-target_min)*pred + target_min
         elif t_norm_type == 'z_score':
             pred = (pred *dataset.dataset.conf.std) + dataset.dataset.conf.mean
         print(t_h,t_w)
-    print('target max : ',round(target.max().item()*1000,2),'mV pred max : ',round(pred.max().item()*1000,2), 'mV treshold : ', round((target.max() * top_region*1000).item(),2),' mV')
+        pred = F.interpolate(pred.unsqueeze(0), size=(1,t_h, t_w), mode='area').squeeze(0)
+
+    t_max = target.max().item()
+    p_max = pred.max().item()
+    th = (target.max() * top_region).item()
+    print('target max : ',round(t_max if not use_raw else t_max *1000,3),
+          'mV pred max : ',round(p_max if not use_raw else p_max *1000,3), 
+          'mV treshold : ',round(th if not use_raw else th *1000,3) ,' mV')
 
     mae_map = torch.abs(pred - target) 
     if use_raw:
@@ -74,6 +78,9 @@ def predict_and_visualize(dataset, model, checkpoint_path,
     mae_10, f1 = calculate_metrics(pred, target, mask_opt=mask_opt,top_region=top_region)
     print(f"F1 Score: {f1:.3f}")
     print(f'mae 10 : {mae_10*1000:.3f}' + ' mV' if use_raw else '')
+
+    target_div = target / torch.norm(target,p=2)
+    print(f'norm : {torch.norm(target,p=2)} normed max : {target_div.max()} normed_min {target_div.min()}, target min : {target.min()}')
     if inp.dim() == 2:  # 단일 채널, 
         all_images = [inp]
     elif inp.dim() == 3:  # 다중 채널, 
@@ -88,9 +95,9 @@ def predict_and_visualize(dataset, model, checkpoint_path,
 
     if plot_mask:
         if mask_opt == 'max':
-            threshold = target.max() * top_region
-            target_mask = (target >= threshold).float()
-            pred_mask = (pred >= threshold).float()
+            target_threshold = target.max() * top_region
+            target_mask = (target >= target_threshold).float()
+            pred_mask = (pred >= target_threshold).float()
         elif mask_opt == 'quantile':
             pred_threshold = torch.quantile(pred.view(-1),top_region)
             target_threshold = torch.quantile(target.view(-1),top_region)
@@ -100,11 +107,15 @@ def predict_and_visualize(dataset, model, checkpoint_path,
             target_threshold = torch.quantile(target.view(-1),top_region)
             pred_mask = (pred >= target_threshold).float()
             target_mask = (target >= target_threshold).float()
+        elif mask_opt == 'quantile_pred':
+            target_threshold = torch.quantile(pred.view(-1),top_region)
+            pred_mask = (pred >= target_threshold).float()
+            target_mask = (target >= target_threshold).float()
         all_images += [target_mask, pred_mask]
         titles += ['Target Mask', 'Prediction Mask']
 
     if plot_scatter:
-        all_images.append((target.flatten(), pred.flatten(), target.max() * 0.9))  # threshold와 함께 tuple 저장
+        all_images.append((target.flatten(), pred.flatten(), target_threshold if not use_raw else target_threshold*1000))  # threshold와 함께 tuple 저장
         titles.append('Target vs. Pred (Scatter)')
         
     rows = (len(all_images) + cols - 1) // cols
@@ -117,16 +128,18 @@ def predict_and_visualize(dataset, model, checkpoint_path,
         ax = axes[i]
         if isinstance(img, tuple):  # Scatter인 경우
             target_flat, pred_flat, threshold = img[0].cpu().numpy(), img[1].cpu().numpy(), img[2].cpu().numpy()
+            if use_raw : target_flat, pred_flat = target_flat*1000, pred_flat*1000
             ax.scatter(target_flat, pred_flat, alpha=0.3, s=5, label='All Points')  # 모든 점
             min_val = min(target_flat.min(), pred_flat.min())
             max_val = max(target_flat.max(), pred_flat.max())
             ax.plot([min_val, max_val], [min_val, max_val], 'r--', label='y = x')
             mask_high = target_flat >= threshold
-            ax.scatter(target_flat[mask_high],pred_flat[mask_high], color='red', s=5, marker='s', label='Target ≥ 90% max')
+            golden_ir , p_ir = target_flat[mask_high],pred_flat[mask_high]
+            ax.scatter(golden_ir , p_ir, color='red', s=5, marker='s', label='Target ≥ 90% max')
 
             ax.set_xlabel('Target IR Drop')
             ax.set_ylabel('Prediction')
-            ax.set_title('Scatter Plot: Target vs. Prediction')
+            ax.set_title('Scatter Plot: Target vs. Prediction'+ ('' if not use_raw else '(mV)'))
             ax.legend()
         else:  # 일반 이미지인 경우
             img = img.squeeze().cpu().numpy()

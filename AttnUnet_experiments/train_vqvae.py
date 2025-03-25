@@ -16,7 +16,7 @@ from models import *
 from models.parts.vqvae import init_weights
 
 from metric import IRDropMetrics 
-from ir_dataset import IRDropDataset,build_dataset_iccad,build_dataset,build_dataset_began_asap7,build_dataset_5m
+from ir_dataset import IRDropDataset,build_dataset_iccad,build_dataset,build_dataset_began_asap7,build_dataset_5m, build_dataset_iccad_fake_real,build_dataset_iccad_real_hidden
 from loss import *
 
 
@@ -58,7 +58,10 @@ parser.add_argument('--use_ema', action='store_true', help='vq ema')
 parser.add_argument('--dbu_per_px', type=str, default='1um', help='210nm or 1um')
 parser.add_argument('--checkpoint_path', type=str, default='', help='')
 parser.add_argument('--metric_type', type=str, default='max', help='max or quantile')
+parser.add_argument('--inp_norm', type=str, default='sample_min_max', help='normalize types')
+parser.add_argument('--target_norm', type=str, default='sample_min_max', help='normalize types')
 parser.add_argument('--num_embeddings', type=int, default=512, help='number of codebooks vector')
+parser.add_argument('--top_percent', type=float, default=0.8, help='metrics threshold')
 args = parser.parse_args()
 
 
@@ -83,10 +86,9 @@ class IRDropPrediction(LightningModule):
                                     use_cache=True if args.loss == 'cache' else False,
                                     dice_q=args.dice_q,
                                     post_min_max=args.post_min_max
-                                    ) #nn.MSELoss() #combined_loss #CustomLoss() #nn.MSELoss()
+                                    )
         print(self.criterion.loss_type)
-        print('use ema : ', self.use_ema)
-        self.metrics = IRDropMetrics(post_min_max=args.post_min_max,how=args.metric_type)
+        self.metrics = IRDropMetrics(post_min_max=args.post_min_max,how=args.metric_type,top_percent=args.top_percent)
         self.save_hyperparameters(args)
 
     def forward(self, x):
@@ -173,6 +175,20 @@ class IRDropPrediction(LightningModule):
                                                                             use_raw=args.use_raw
 
                                                                             )
+            elif args.dataset.lower() == 'iccad_fake_real': # g_max finetune
+                self.train_dataset, self.val_dataset = build_dataset_iccad_fake_real(finetune=args.finetune,
+                                                                            pdn_zeros=False,
+                                                                            in_ch=args.in_ch,
+                                                                            img_size=args.img_size,
+                                                                            use_raw=args.use_raw
+                                                                            )
+            elif args.dataset.lower() == 'iccad_real_hidden': # g_max finetune
+                self.train_dataset, self.val_dataset = build_dataset_iccad_real_hidden(finetune=args.finetune,
+                                                                            pdn_zeros=False,
+                                                                            in_ch=args.in_ch,
+                                                                            img_size=args.img_size,
+                                                                            use_raw=args.use_raw
+                                                                            )
             elif args.dataset.lower() == 'asap7':
                 self.train_dataset, self.val_dataset = build_dataset_began_asap7(finetune=args.finetune,
                                                                                    train=True,
@@ -186,7 +202,9 @@ class IRDropPrediction(LightningModule):
                                                                         use_raw=args.use_raw,
                                                                         in_ch=args.in_ch,
                                                                         train=True,
-                                                                        unit=args.dbu_per_px
+                                                                        unit=args.dbu_per_px,
+                                                                        input_norm_type=args.inp_norm,
+                                                                        target_norm_type=args.target_norm
                                                                                    )
             else:
                 raise NameError('check dataset name')

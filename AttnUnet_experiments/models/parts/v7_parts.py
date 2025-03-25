@@ -106,76 +106,81 @@ class DropBlock2D(nn.Module):
         return self.drop_prob / (self.block_size ** 2)
 
 class PreConv(nn.Module):
-    def __init__(self, in_ch,out_ch,stride=1,padding=1) -> None:
+    def __init__(self, in_ch,out_ch,kernel_size=7, stride=2,padding=3,act=None) -> None:
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=in_ch,out_channels=out_ch,kernel_size=3,stride=stride,padding=padding,bias=False)
+        self.conv = nn.Conv2d(in_channels=in_ch,out_channels=out_ch,kernel_size=kernel_size,stride=stride,padding=padding,bias=False)
         self.bn = nn.GroupNorm(1, out_ch)
-
+        self.act = act
+        
     def forward(self,x):
         x = self.conv(x)
         x = self.bn(x)
+        x = self.act(x)
 
         return x
 
-class ResNeXtBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, cardinality=8, dropout_m=nn.Dropout2d, dropout_p=0.0, act=SwishT_C()):
+class ResNeXtBottleneck(nn.Module):
+    def __init__(self, in_ch, out_ch, cardinality=8, 
+                 dropout_m=nn.Dropout2d, dropout_p=0.0, 
+                 act=SwishT_C()):
         super().__init__()
-        # mid_ch를 out_ch의 절반으로 계산한 후, cardinality로 나누어 떨어지도록 조정
-        mid_ch = (out_ch // 2 // cardinality) * cardinality
-        if mid_ch == 0:
-            mid_ch = cardinality
-
-        # 1x1 컨볼루션: 차원 축소
+        # mid_ch 예: out_ch // 4
+        mid_ch = out_ch // 4
+        # 1) 1x1 Conv (in_ch -> mid_ch)
         self.conv1 = nn.Conv2d(in_ch, mid_ch, kernel_size=1, bias=False)
-        self.gn1 = nn.GroupNorm(1, mid_ch)
-        
-        self.act = act
-        
-        # 3x3 컨볼루션: 그룹 컨볼루션 (mid_ch가 cardinality로 나누어 떨어짐)
-        self.conv2 = nn.Conv2d(mid_ch, mid_ch, kernel_size=3, stride=1, padding=1, groups=cardinality, bias=False)
-        self.gn2 = nn.GroupNorm(1, mid_ch)
-        
-        # 1x1 컨볼루션: 차원 복원
+        self.gn1   = nn.GroupNorm(1, mid_ch)
+
+        # 2) 3x3 Group Conv (mid_ch -> mid_ch), groups=cardinality
+        self.conv2 = nn.Conv2d(mid_ch, mid_ch, kernel_size=3, padding=1, 
+                               groups=cardinality, bias=False)
+        self.gn2   = nn.GroupNorm(1, mid_ch)
+
+        # 3) 1x1 Conv (mid_ch -> out_ch)
         self.conv3 = nn.Conv2d(mid_ch, out_ch, kernel_size=1, bias=False)
-        self.gn3 = nn.GroupNorm(1, out_ch)
-        
-        # dropout (dropout_p > 0인 경우)
+        self.gn3   = nn.GroupNorm(1, out_ch)
+
         self.dropout = dropout_m(p=dropout_p) if dropout_p > 0 else nn.Identity()
-        
-        # 입력과 출력의 채널 수가 다르면 shortcut 경로에 1x1 컨볼루션 적용
-        self.residual_conv = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False) if in_ch != out_ch else nn.Identity()
+
+        self.shortcut = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False) \
+            if in_ch != out_ch else nn.Identity()
+
+        self.act = act
 
     def forward(self, x):
-        residual = self.residual_conv(x)
-        
+        # shortcut path
+        identity = self.shortcut(x)
+
         out = self.conv1(x)
         out = self.gn1(out)
         out = self.act(out)
-        
+
         out = self.conv2(out)
         out = self.gn2(out)
         out = self.act(out)
-        
+
         out = self.conv3(out)
         out = self.gn3(out)
         out = self.dropout(out)
-        
-        out += residual
+
+        out += identity
         out = self.act(out)
-        
         return out
+
 
 class DownBlock(nn.Module):
     def __init__(self, in_ch, out_ch, dropout_m, dropout_p, act=SwishT_C(), cardinality=8):
         super().__init__()
         # 기존 ResNeXtBlock 대신 ResNeXtBlock 사용
-        self.conv = ResNeXtBlock(in_ch, out_ch, cardinality=cardinality, dropout_m=dropout_m, dropout_p=dropout_p, act=act)
-        self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
+        self.conv1 = ResNeXtBottleneck(in_ch, out_ch, cardinality=cardinality, dropout_m=dropout_m, dropout_p=dropout_p, act=act)
+        self.conv2 = ResNeXtBottleneck(out_ch, out_ch, cardinality=cardinality, dropout_m=dropout_m, dropout_p=dropout_p, act=act)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
-        x1 = self.conv(x)
-        x2 = self.pool(x1)
-        return x2
+        x1 = self.conv1(x)
+        x2 = self.conv2(x1)
+        x2 += x1
+        x3 = self.pool(x2)
+        return x3
 
 class AttentionGate(nn.Module):
     def __init__(self,in_ch_x,in_ch_g,out_ch,concat=True) -> None:
@@ -209,7 +214,7 @@ class UpBlock(nn.Module):
         super(UpBlock, self).__init__()
         self.up = nn.Upsample(scale_factor=2)
         # UpBlock에서는 입력 채널은 in_ch_x + in_ch_g입니다.
-        self.conv = ResNeXtBlock(in_ch_x + in_ch_g, out_ch, cardinality=cardinality, dropout_m=dropout_m, dropout_p=dropout_p, act=act)
+        self.conv = ResNeXtBottleneck(in_ch_x + in_ch_g, out_ch, cardinality=cardinality, dropout_m=dropout_m, dropout_p=dropout_p, act=act)
 
     def forward(self, attn, x):
         x = torch.cat([attn, x], dim=1)

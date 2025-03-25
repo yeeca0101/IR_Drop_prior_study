@@ -243,7 +243,7 @@ class IRDropDataset(Dataset):
     def _load_data_from_disk_3ch(self, idx):
         input_data_2ch, ir_drop = self._load_data_from_disk_2ch(idx)
         file_group = self.data_files[idx]
-        pad_distance = self._norm(np.load(file_group['pad_distance']))
+        pad_distance = self._norm(np.load(file_group['eff_dist']))
         
         current = input_data_2ch[..., 0]      # current 채널
         resistance_total = input_data_2ch[..., 1]  # resistance 합산 채널
@@ -258,7 +258,7 @@ class IRDropDataset(Dataset):
         return x / x.max()
 
     def _min_max_norm(self,x):
-        return x / x.max()
+        return x / 6.0997e-03 
         # return (x-x.min())/(x.max()-x.min())
     
     def __getitem__(self, idx):
@@ -510,6 +510,9 @@ class IRDropFineTuneDataset(Dataset):
     def z_norm(self,x):
         return (x-0.00112233)/0.00038944
     
+    def _iccad_max_norm(self,x):
+        return x/6.0997e-03
+    
     def __getitem__(self, idx):
         input_data, ir_drop = self._load_data_from_disk(idx) if self.in_ch != 2 else self._load_data_from_disk_2ch(idx)
         input_data= self.resize.apply(input_data,interpolation=cv2.INTER_AREA)
@@ -518,7 +521,7 @@ class IRDropFineTuneDataset(Dataset):
         if not self.use_raw:
             ir_drop = self.resize.apply_to_mask(ir_drop,interpolation=cv2.INTER_AREA)
             # ir_drop *= 100 
-            ir_drop = self._norm(ir_drop)
+            ir_drop = self._iccad_max_norm(ir_drop)
 
         if self.train:
             transformed = self.train_transform(image=input_data, mask=ir_drop)
@@ -816,7 +819,7 @@ def build_dataset(root_path='/data/BeGAN-circuit-benchmarks',img_size=512,train=
 ############ 5nm ###########################################################
 def build_dataset_5m(img_size=256,train=True,
                  in_ch=2,use_raw=False, unit='1um',train_auto_encoder=False,
-                 root_path = '/data',inn=False):
+                 root_path = '/data',inn=False,target_norm_type=None,input_norm_type=None):
     # root_path = "/data"
     # 5th는 기존 ir max 기준으로 수정버전
     selected_folders = [f'pdn_4th_4types/{unit}_numpy',
@@ -831,6 +834,8 @@ def build_dataset_5m(img_size=256,train=True,
                                 in_ch=in_ch,
                                 use_raw=use_raw,
                                 dbu_per_px=unit,
+                                target_norm_type=target_norm_type,
+                                input_norm_type=input_norm_type
                                 )
 
 
@@ -909,6 +914,65 @@ def build_dataset_iccad(finetune=False,pdn_density_p=0.0,pdn_zeros=False,in_ch=1
                         use_raw=use_raw
                     )
     return split_train_val(dataset)
+
+def build_dataset_iccad_fake_real(finetune=False,pdn_density_p=0.0,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False):
+    train_dt = IRDropDataset(root_path='/data/ICCAD_2023/fake-circuit-data_20230623',
+                        selected_folders=['fake-circuit-data-npy'],
+                        img_size=img_size,
+                        post_fix_path='',
+                        target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
+                        preload=False,
+                        pdn_density_p=1., # not use pdn density
+                        pdn_zeros=pdn_zeros,
+                        in_ch=in_ch,
+                        use_raw=use_raw
+                    )
+    root_path='/data/ICCAD_2023/real-circuit-data_20230615'
+    testcase_folders = os.listdir(root_path)
+    val_dt = IRDropFineTuneDataset(root_path=root_path,
+                        selected_folders=testcase_folders,
+                        img_size=img_size,
+                        target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
+                        train=False,
+                        pdn_density_p=1.,
+                        in_ch=in_ch,
+                        pdn_zeros=pdn_zeros,
+                        use_raw=use_raw
+                    )
+    
+
+    return train_dt, val_dt
+
+
+def build_dataset_iccad_real_hidden(finetune=False,pdn_density_p=0.0,pdn_zeros=False,in_ch=12,img_size=512,use_raw=False):
+    root_path='/data/ICCAD_2023/real-circuit-data_20230615'
+    testcase_folders = os.listdir(root_path)
+    train_dt = IRDropFineTuneDataset(root_path=root_path,
+                        selected_folders=testcase_folders,
+                        img_size=img_size,
+                        target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
+                        train=False,
+                        pdn_density_p=1.,
+                        in_ch=in_ch,
+                        pdn_zeros=pdn_zeros,
+                        use_raw=use_raw
+                    )
+    
+    root_path='/data/ICCAD_2023/hidden-real-circuit-data'
+    testcase_folders = os.listdir(root_path)
+    val_dt = IRDropFineTuneDataset(root_path=root_path,
+                        selected_folders=testcase_folders,
+                        img_size=img_size,
+                        target_layers = ['m1', 'm4', 'm7', 'm8', 'm9', 'm14', 'm47', 'm78', 'm89'],
+                        train=False,
+                        pdn_density_p=1.,
+                        in_ch=in_ch,
+                        pdn_zeros=pdn_zeros,
+                        use_raw=use_raw
+                    )
+    
+    return train_dt, val_dt
+
 
 def build_dataset_iccad_finetune(pdn_density_p=0.0,return_case=False,in_ch=12,img_size=512,pdn_zeros=False,preload=False,use_raw=False):
     root_path='/data/ICCAD_2023/real-circuit-data_20230615'

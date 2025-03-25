@@ -20,7 +20,7 @@ from .model_factory.efficientformer.config import  (efficientformerv2_s0_irdrop_
                                                     )
 
 from .model_factory.cfirstnet.net import Net as CFIRST
-
+from .model_factory.resnextunet import build_resnext_unet
 from .parts.vqvae import create_model
 
 
@@ -58,6 +58,17 @@ def build_model(arch,dropout_type,is_fintune,in_ch,use_ema,num_embeddings=512):
         model = EfficientFormer(resolution=256, in_ch=in_ch,num_classes=1, **efficientformerv2_s1_irdrop_config)
     elif arch == 'efficientformers2':
         model = EfficientFormer(resolution=256, in_ch=in_ch,num_classes=1, **efficientformerv2_s2_irdrop_config)
+    elif arch == 'attnv7':
+        model = AttnUnetV7(dropout_name=dropout_type,
+                           dropout_p=0.05 if is_fintune else 0.1,
+                           in_ch=in_ch,
+                           num_embeddings=num_embeddings)
+    elif arch in ['resnextunet','resnextunet_small','resnextunet_base','resnextunet_large']:
+        if arch == 'resnextunet':
+            size = 'small'
+        else:
+            size = arch.split('_')[-1]
+        model = build_resnext_unet(size, in_ch=in_ch)
     elif arch == 'cfirst':
         model = CFIRST(
                 model_backbone="convnextv2_tiny.fcmae",
@@ -68,11 +79,7 @@ def build_model(arch,dropout_type,is_fintune,in_ch,use_ema,num_embeddings=512):
                 decoder_channels=128,
                 out_channels=1,
     )
-    elif arch == 'attnv7':
-        model = AttnUnetV7(dropout_name=dropout_type,
-                           dropout_p=0.05 if is_fintune else 0.1,
-                           in_ch=in_ch,
-                           num_embeddings=num_embeddings)
+
     elif arch =='resmlp_unet':
         model = ResMLP_UNet(in_ch=in_ch,base_dim=32)
     elif arch == 'vqvae': # legacy

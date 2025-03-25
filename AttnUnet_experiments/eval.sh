@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=0 python3 evaluate.py \
     --arch attnv6_1 \
     --num_embeddings 512 \
     --dbu_per_px 1um \
-    --th 0.8 \
+    --th 0.9 \
     --checkpoint_path /IR_Drop_prior_study/AttnUnet_experiments/checkpoint/6th/25/attnv6_1/cus/ssim_huber/1um/finetune/ssim_huber/1um
     
     

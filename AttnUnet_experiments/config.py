@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass, field
+import os
 import cv2
 from datetime import datetime
 
@@ -65,17 +66,15 @@ def map_json_to_config(json_data):
         meta=meta
     )
 
-def get_config(a,config_json_path="/IR_Drop_prior_study/Prior_dev_lab/configs/stastics_1um.json"):
-    """
-    저장된 JSON 파일(config_json_path)을 읽어 Config 객체로 반환합니다.
-    """
+def get_config(unit,configs_path="/IR_Drop_prior_study/Prior_dev_lab/configs"):
+    config_json_path = os.path.join(configs_path,f'stastics_{unit}.json')
     with open(config_json_path, "r") as f:
         json_data = json.load(f)
     return map_json_to_config(json_data)
 
 # 출력 예시
 if __name__ == "__main__":
-    config = get_config()
+    config = get_config('500nm')
     
     print("IR Drop 통계:")
     if config.ir_drop:
